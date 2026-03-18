@@ -947,8 +947,19 @@ function addItem(){
     D._autoAddedPIds.add(np.id);
     sb.from('products').upsert({id:np.id,shop_id:currentShop.id,name:np.name,barcode:'',hsn:np.hsn,gst:np.gst,buy_price:0,sell_price:np.sellPrice,stock:0,min_stock:0,unit:'Pcs'}).catch(()=>{});
   }
-  const base=qty*rate,gstAmt=base*gst/100;
-  D.billItems.push({pId,name:nameText,qty,rate,gst,base,gstAmt,total:base+gstAmt,hsn:document.getElementById('sh')?.value||''});
+  // टोटल column दिया हो तो: taxable=floor, gst=floor, total=base+gstAmt ≤ totInp
+  let base, gstAmt, total;
+  if(totInp){
+    const rawGst = totInp * gst / (100 + gst);
+    gstAmt = Math.floor(rawGst * 100) / 100;             // floor ← कम होगा
+    base   = Math.floor((totInp - gstAmt) * 100) / 100;  // floor ← taxable
+    total  = parseFloat((base + gstAmt).toFixed(2));      // ≤ totInp ✓
+  } else {
+    base   = parseFloat((qty * rate).toFixed(2));
+    gstAmt = parseFloat((base * gst / 100).toFixed(2));
+    total  = parseFloat((base + gstAmt).toFixed(2));
+  }
+  D.billItems.push({pId,name:nameText,qty,rate,gst,base,gstAmt,total,hsn:document.getElementById('sh')?.value||''});
   document.getElementById('sp-text').value='';
   document.getElementById('sq').value=1;
   document.getElementById('sr').value='';
