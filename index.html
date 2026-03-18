@@ -309,36 +309,105 @@ const SB_URL = 'https://ouusbkidjfxnyoertlhz.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im91dXNia2lkamZ4bnlvZXJ0bGh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NzcwMDMsImV4cCI6MjA4OTM1MzAwM30.qk0t2dSFCxh_0emTaVPPUKFbFII0wpIKwB7MRR_Wa8Y';
 // ============================================================
 
-// ── PWA MANIFEST (inline) ──
-const MANIFEST={name:'अपना दुकान',short_name:'दुकान',description:'GST बिलिंग ऐप',start_url:'./',display:'standalone',background_color:'#f3f4f6',theme_color:'#1a56db',orientation:'portrait-primary',icons:[{src:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="80" fill="%231a56db"/><text y="340" x="256" text-anchor="middle" font-size="300" font-family="sans-serif">🏪</text></svg>',sizes:'512x512',type:'image/svg+xml',purpose:'any maskable'}]};
+// ── PWA MANIFEST (inline) — GitHub Pages subfolder fixed ──
+const APP_SCOPE='/apna-dukan/';
+const MANIFEST={
+  name:'अपना दुकान',short_name:'दुकान',
+  description:'GST बिलिंग ऐप — Windows & Android',
+  start_url:'/apna-dukan/',
+  scope:'/apna-dukan/',
+  display:'standalone',
+  background_color:'#f3f4f6',
+  theme_color:'#1a56db',
+  orientation:'portrait-primary',
+  icons:[
+    {src:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="80" fill="%231a56db"/><text y="340" x="256" text-anchor="middle" font-size="260" font-family="sans-serif">🏪</text></svg>',sizes:'192x192',type:'image/svg+xml'},
+    {src:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="80" fill="%231a56db"/><text y="340" x="256" text-anchor="middle" font-size="260" font-family="sans-serif">🏪</text></svg>',sizes:'512x512',type:'image/svg+xml',purpose:'any maskable'}
+  ]
+};
 const mBlob=new Blob([JSON.stringify(MANIFEST)],{type:'application/json'});
 document.getElementById('pwa-manifest').href=URL.createObjectURL(mBlob);
 
-// ── SERVICE WORKER (inline via blob) ──
+// ── SERVICE WORKER — blob scope fix for GitHub Pages ──
+// SW blob URL cannot control pages outside its origin-path.
+// Solution: write SW as inline script injected via a same-origin blob
+// with the correct scope header workaround.
 const SW_CODE=`
-const CACHE='apna-dukan-v1';
-const ASSETS=['/'];
-self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()))});
-self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
+const CACHE_NAME='apna-dukan-v3';
+const APP_URL='/apna-dukan/';
+
+self.addEventListener('install',e=>{
+  self.skipWaiting();
+  e.waitUntil(
+    caches.open(CACHE_NAME).then(c=>c.add(APP_URL)).catch(()=>{})
+  );
+});
+
+self.addEventListener('activate',e=>{
+  e.waitUntil(
+    caches.keys().then(keys=>
+      Promise.all(keys.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))
+    ).then(()=>self.clients.claim())
+  );
+});
+
 self.addEventListener('fetch',e=>{
   if(e.request.method!=='GET')return;
   const url=new URL(e.request.url);
-  if(url.origin.includes('supabase')){
-    e.respondWith(fetch(e.request).catch(()=>new Response(JSON.stringify({error:'offline'}),{headers:{'Content-Type':'application/json'}})));
+
+  // Supabase API — network first, no cache
+  if(url.hostname.includes('supabase.co')||url.hostname.includes('supabase.in')){
+    e.respondWith(
+      fetch(e.request).catch(()=>
+        new Response(JSON.stringify({error:'offline'}),
+          {status:503,headers:{'Content-Type':'application/json'}})
+      )
+    );
     return;
   }
-  e.respondWith(caches.match(e.request).then(cached=>{
-    const fresh=fetch(e.request).then(r=>{if(r.ok){const c=r.clone();caches.open(CACHE).then(cache=>cache.put(e.request,c))}return r}).catch(()=>null);
-    return cached||fresh;
-  }));
+
+  // App shell (index.html) — cache first, fallback network
+  if(url.pathname===APP_URL||url.pathname===APP_URL+'index.html'){
+    e.respondWith(
+      caches.match(e.request).then(cached=>{
+        const network=fetch(e.request).then(r=>{
+          if(r.ok){caches.open(CACHE_NAME).then(c=>c.put(e.request,r.clone()));}
+          return r;
+        }).catch(()=>null);
+        return cached||network;
+      })
+    );
+    return;
+  }
+
+  // CDN (supabase-js) — cache first
+  if(url.hostname.includes('jsdelivr')||url.hostname.includes('cdnjs')){
+    e.respondWith(
+      caches.match(e.request).then(cached=>{
+        if(cached)return cached;
+        return fetch(e.request).then(r=>{
+          if(r.ok){caches.open(CACHE_NAME).then(c=>c.put(e.request,r.clone()));}
+          return r;
+        });
+      })
+    );
+    return;
+  }
 });
 `;
+
 if('serviceWorker' in navigator){
-  const swBlob=new Blob([SW_CODE],{type:'application/javascript'});
-  const swURL=URL.createObjectURL(swBlob);
-  navigator.serviceWorker.register(swURL,{scope:'./'}).then(reg=>{
-    console.log('SW registered');
-  }).catch(e=>console.log('SW error:',e));
+  // Primary: use sw.js from same origin (required for proper scope on GitHub Pages)
+  navigator.serviceWorker.register('/apna-dukan/sw.js', {scope:'/apna-dukan/'})
+    .then(()=>console.log('SW registered via sw.js'))
+    .catch(err=>{
+      // Fallback: blob-based SW (works in browser, not in installed PWA)
+      const swBlob=new Blob([SW_CODE],{type:'application/javascript'});
+      const swURL=URL.createObjectURL(swBlob);
+      navigator.serviceWorker.register(swURL,{scope:'/apna-dukan/'})
+        .then(()=>console.log('SW registered via blob'))
+        .catch(e2=>console.log('SW unavailable:',e2.message));
+    });
 }
 
 // ── OFFLINE DETECTION ──
@@ -396,7 +465,7 @@ const HSN_DB=[
 
 let sb, currentUser=null, currentShop=null, activeTab='dashboard';
 let D={products:[],customers:[],bills:[],billItems:[],udhar:[],settings:{}};
-let syncOk=false;
+let syncOk=false, _authHandled=false;
 
 sb = window.supabase.createClient(SB_URL, SB_KEY);
 
@@ -414,8 +483,9 @@ function setAlert(id,msg,type='err'){const el=document.getElementById(id);if(el)
 // ── INIT ──
 async function renderRoot(){
   document.getElementById('root').innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh"><div class="loader"></div></div>';
-  const {data:{session}}=await sb.auth.getSession();
-  if(!session){renderAuth('login');return;}
+  const {data:{session},error}=await sb.auth.getSession();
+  if(error||!session){renderAuth('login');return;}
+  _authHandled=true; // prevent onAuthStateChange from re-triggering
   currentUser=session.user;
   await loadShopForUser();
 }
@@ -570,7 +640,7 @@ async function doForgot(){
 
 async function doLogout(){
   await sb.auth.signOut();
-  currentUser=null;currentShop=null;
+  currentUser=null;currentShop=null;_authHandled=false;
   D={products:[],customers:[],bills:[],billItems:[],settings:{}};
   renderAuth('login');
 }
@@ -1405,12 +1475,25 @@ function expGST(){const sel=document.getElementById('rep-m')?.value;const fl=sel
 function expBill(id){const b=D.bills.find(x=>x.id===id);if(!b)return;dlCSV(csv(['#','Product','HSN','Qty','Rate','GST%','GST Amount','Total'],(b.items||[]).map((item,i)=>[i+1,item.name,item.hsn||'',item.qty,fmtN(item.rate),item.gst+'%',fmtN(item.gstAmt),fmtN(item.total)])),'Bill_'+billNo(id)+'.csv')}
 
 // ── LISTEN AUTH CHANGES (Google OAuth redirect के बाद) ──
+// Flag to prevent double-loading when renderRoot and onAuthStateChange both fire
+let _authHandled = false;
+
 sb.auth.onAuthStateChange(async(event,session)=>{
-  if((event==='SIGNED_IN'||event==='TOKEN_REFRESHED')&&session&&!currentUser){
+  if(event==='SIGNED_IN' && session && !currentUser && !_authHandled){
+    // Only handle if renderRoot hasn't already handled it
+    _authHandled = true;
     currentUser=session.user;
     await loadShopForUser();
   }
-  if(event==='SIGNED_OUT'){currentUser=null;renderAuth('login')}
+  if(event==='TOKEN_REFRESHED' && session && currentUser){
+    // Silent refresh — no reload needed
+    return;
+  }
+  if(event==='SIGNED_OUT'){
+    currentUser=null;
+    _authHandled=false;
+    renderAuth('login');
+  }
 });
 
 renderRoot();
