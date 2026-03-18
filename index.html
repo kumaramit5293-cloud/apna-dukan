@@ -127,12 +127,34 @@ tr:hover td{background:var(--bg2)}
 #toast{position:fixed;bottom:1.5rem;right:1.5rem;padding:.75rem 1.25rem;border-radius:10px;font-size:13px;font-weight:500;z-index:9999;display:none;border:1px solid var(--bdr);background:var(--bg1);max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.15)}
 .loader{width:16px;height:16px;border:2px solid var(--bdr);border-top-color:var(--acc);border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
 @keyframes spin{to{transform:rotate(360deg)}}
-@media print{.sidebar,.topbar,.no-print{display:none!important}.bprev{border:none;padding:0}}
+/* ── AUTOCOMPLETE ── */
+.ac-wrap{position:relative}
+.ac-drop{position:absolute;top:100%;left:0;right:0;background:var(--bg1);border:1px solid var(--bdr2);border-radius:9px;z-index:200;max-height:220px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.12);margin-top:2px}
+.ac-item{padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:.5px solid var(--bdr)}
+.ac-item:last-child{border-bottom:none}
+.ac-item:hover,.ac-item.active{background:var(--accl);color:var(--acc)}
+.ac-item small{font-size:11px;color:var(--t2);margin-left:6px}
+/* ── MODAL ── */
+.modal-wrap{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.45);z-index:500;display:flex;align-items:center;justify-content:center;padding:1rem}
+.modal-box{background:var(--bg1);border-radius:16px;border:1px solid var(--bdr);padding:1.5rem;width:100%;max-width:400px;max-height:90vh;overflow-y:auto}
+/* ── UDHAR ── */
+.udhar-amt{color:var(--err-t);font-weight:600}
+.paid-amt{color:var(--ok-t);font-weight:600}
+/* ── SIGNATURE ── */
+.sig-area{margin-top:1.25rem;padding-top:.875rem;border-top:1px dashed var(--bdr);display:flex;justify-content:flex-end}
+.sig-box{text-align:center;width:180px}
+.sig-line{border-bottom:1px solid var(--t1);height:50px;margin-bottom:4px}
+.sig-label{font-size:10px;color:var(--t2)}
+/* ── TOTAL INPUT HIGHLIGHT ── */
+input.total-inp{background:var(--accl);border-color:var(--acc);font-weight:600}
+input.total-inp:focus{background:var(--accl)}
+@media print{.sidebar,.topbar,.no-print{display:none!important}.bprev{border:none;padding:0}.sig-area{margin-top:1rem}}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <div id="toast"></div>
+<div id="modal-root"></div>
 <script>
 // ============================================================
 //  !! यहाँ सिर्फ अपनी Supabase details बदलें !!
@@ -165,7 +187,7 @@ const HSN_DB=[
 ];
 
 let sb, currentUser=null, currentShop=null, activeTab='dashboard';
-let D={products:[],customers:[],bills:[],billItems:[],settings:{}};
+let D={products:[],customers:[],bills:[],billItems:[],udhar:[],settings:{}};
 let syncOk=false;
 
 sb = window.supabase.createClient(SB_URL, SB_KEY);
@@ -173,9 +195,10 @@ sb = window.supabase.createClient(SB_URL, SB_KEY);
 // ── UTILS ──
 const fmt=n=>'₹'+parseFloat(n||0).toFixed(2);
 const fmtN=n=>parseFloat(n||0).toFixed(2);
-const billNo=n=>(D.settings.billPrefix||'INV')+'-'+n;
+const billNo=n=>{const pfx=(D.settings.billPrefix||'').trim();return pfx?(pfx+'-'+n):String(n)};
 function saveLocal(){if(currentShop)localStorage.setItem('ld_'+currentShop,JSON.stringify({...D,billItems:D.billItems||[]}))}
-function loadLocal(){const d=localStorage.getItem('ld_'+currentShop);if(d){const p=JSON.parse(d);D={...p,billItems:p.billItems||[]}}}
+function loadLocal(){const d=localStorage.getItem('ld_'+currentShop);if(d){const p=JSON.parse(d);D={...p,billItems:p.billItems||[],udhar:p.udhar||[]}}}
+function closeModal(){document.getElementById('modal-root').innerHTML=''}
 function toast(msg,type='ok'){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';t.style.color=type==='err'?'var(--err-t)':type==='warn'?'var(--warn-t)':'var(--ok-t)';clearTimeout(t._to);t._to=setTimeout(()=>t.style.display='none',3500)}
 function updSync(ok){syncOk=ok;const el=document.getElementById('sync-dot');if(el){el.className='sync-badge '+(ok?'sync-ok':'sync-off');el.textContent=ok?'● Cloud sync चालू':'● Offline mode'}}
 function setAlert(id,msg,type='err'){const el=document.getElementById(id);if(el)el.innerHTML=msg?`<div class="alert alert-${type}">${msg}</div>`:'';}
@@ -364,8 +387,10 @@ async function loadShopForUser(){
   }else{
     currentShop=data;
   }
-  D.settings=currentShop?.settings||{shopName:'दुकान',gstin:'',phone:'',state:'Bihar',address:'',bankName:'',accountNo:'',ifsc:'',upiId:'',billPrefix:'INV',nextBill:1001};
+  D.settings=currentShop?.settings||{shopName:'दुकान',gstin:'',phone:'',state:'Bihar',address:'',bankName:'',accountNo:'',ifsc:'',upiId:'',billPrefix:'',nextBill:1};
+  if(!D.settings.hasOwnProperty('billPrefix'))D.settings.billPrefix='';
   if(!D.billItems)D.billItems=[];
+  if(!D.udhar)D.udhar=[];
   loadLocal();
   renderApp();
   syncAll();
@@ -382,7 +407,7 @@ async function syncAll(){
     ]);
     if(pr.error)throw pr.error;
     D.products=(pr.data||[]).map(p=>({id:p.id,name:p.name,barcode:p.barcode,hsn:p.hsn,gst:p.gst,buyPrice:p.buy_price,sellPrice:p.sell_price,stock:p.stock,minStock:p.min_stock,unit:p.unit}));
-    D.customers=(cu.data||[]).map(c=>({id:c.id,name:c.name,phone:c.phone,gstin:c.gstin,address:c.address,totalPurchase:c.total_purchase}));
+    D.customers=(cu.data||[]).map(c=>({id:c.id,name:c.name,phone:c.phone,gstin:c.gstin,address:c.address,totalPurchase:c.total_purchase,udhar:c.udhar||0}));
     D.bills=(bi.data||[]).map(b=>({id:b.id,date:b.date,customer:b.customer,custId:b.cust_id,custGstin:b.cust_gstin,custAddr:b.cust_addr,items:b.items,subtotal:b.subtotal,gstTotal:b.gst_total,grand:b.grand,payment:b.payment}));
     if(sh.data?.settings)D.settings={...D.settings,...sh.data.settings};
     if(!D.billItems)D.billItems=[];
@@ -395,8 +420,8 @@ function renderApp(){
   const s=D.settings||{};
   const email=currentUser?.email||'';
   const uname=s.shopName||email.split('@')[0];
-  const tabs=['dashboard','billing','inventory','customers','bills','reports','settings'];
-  const labels=['डैशबोर्ड','GST बिल','इनवेंटरी','कस्टमर','बिल इतिहास','रिपोर्ट','सेटिंग्स'];
+  const tabs=['dashboard','billing','udhar','inventory','customers','bills','reports','settings'];
+  const labels=['डैशबोर्ड','GST बिल','उधार','इनवेंटरी','कस्टमर','बिल इतिहास','रिपोर्ट','सेटिंग्स'];
   document.getElementById('root').innerHTML=`
 <div class="app">
 <div class="sidebar">
@@ -435,15 +460,15 @@ function renderApp(){
 
 function sw(id){
   activeTab=id;
-  const L={dashboard:'डैशबोर्ड',billing:'GST बिल बनाएं',inventory:'इनवेंटरी',customers:'कस्टमर',bills:'बिल इतिहास',reports:'रिपोर्ट',settings:'सेटिंग्स'};
+  const L={dashboard:'डैशबोर्ड',billing:'GST बिल बनाएं',udhar:'उधार / बकाया',inventory:'इनवेंटरी',customers:'कस्टमर',bills:'बिल इतिहास',reports:'रिपोर्ट',settings:'सेटिंग्स'};
   const el=document.getElementById('ptitle');if(el)el.textContent=L[id];
-  document.querySelectorAll('.nav').forEach((n,i)=>n.classList.toggle('on',['dashboard','billing','inventory','customers','bills','reports','settings'][i]===id));
+  document.querySelectorAll('.nav').forEach((n,i)=>n.classList.toggle('on',['dashboard','billing','udhar','inventory','customers','bills','reports','settings'][i]===id));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
   const tab=document.getElementById('tab-'+id);if(tab)tab.classList.add('on');
   renderTab(id);
 }
-function renderTab(id){({dashboard:renderDash,billing:renderBilling,inventory:renderInv,customers:renderCust,bills:renderBillsTab,reports:renderReports,settings:renderSettings})[id]?.()}
-function renderAllTabs(){['dashboard','billing','inventory','customers','bills','reports','settings'].forEach(renderTab)}
+function renderTab(id){({dashboard:renderDash,billing:renderBilling,udhar:renderUdhar,inventory:renderInv,customers:renderCust,bills:renderBillsTab,reports:renderReports,settings:renderSettings})[id]?.()}
+function renderAllTabs(){['dashboard','billing','udhar','inventory','customers','bills','reports','settings'].forEach(renderTab)}
 
 // ── DASHBOARD ──
 function renderDash(){
@@ -453,21 +478,23 @@ function renderDash(){
   const tb=D.bills.filter(b=>new Date(b.date).toDateString()===today);
   const mb=D.bills.filter(b=>{const d=new Date(b.date);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();});
   const low=D.products.filter(p=>+p.stock<=+(p.minStock||5));
+  const totalUdhar=D.customers.reduce((s,c)=>s+(+c.udhar||0),0);
+  const udharCount=D.customers.filter(c=>+c.udhar>0).length;
   el.innerHTML=`
 <div class="g4">
   <div class="sc"><div class="lbl">आज की बिक्री</div><div class="val">${fmt(tb.reduce((s,b)=>s+b.grand,0))}</div><div class="sub">${tb.length} बिल आज</div></div>
   <div class="sc"><div class="lbl">इस महीने</div><div class="val">${fmt(mb.reduce((s,b)=>s+b.grand,0))}</div><div class="sub">${mb.length} बिल</div></div>
-  <div class="sc"><div class="lbl">प्रोडक्ट</div><div class="val">${D.products.length}</div><div class="sub">इनवेंटरी में</div></div>
-  <div class="sc"><div class="lbl">कम स्टॉक</div><div class="val" style="color:var(--err-t)">${low.length}</div><div class="sub">अलर्ट</div></div>
+  <div class="sc" style="cursor:pointer" onclick="sw('udhar')"><div class="lbl">कुल उधार बकाया</div><div class="val" style="color:var(--err-t)">${fmt(totalUdhar)}</div><div class="sub">${udharCount} लोगों का</div></div>
+  <div class="sc"><div class="lbl">कम स्टॉक</div><div class="val" style="color:var(--warn-t)">${low.length}</div><div class="sub">अलर्ट</div></div>
 </div>
 <div class="g2">
   <div class="card"><div class="ct">हाल के बिल</div>
     <table><thead><tr><th>बिल नं</th><th>कस्टमर</th><th>कुल</th><th>भुगतान</th></tr></thead>
     <tbody>${[...D.bills].slice(0,6).map(b=>`<tr><td>${billNo(b.id)}</td><td>${b.customer}</td><td>${fmt(b.grand)}</td><td><span class="bdg bb">${b.payment}</span></td></tr>`).join('')||'<tr><td colspan="4" style="text-align:center;padding:1rem;color:var(--t2)">कोई बिल नहीं</td></tr>'}</tbody>
     </table></div>
-  <div class="card"><div class="ct">कम स्टॉक अलर्ट</div>
-    <table><thead><tr><th>प्रोडक्ट</th><th>स्टॉक</th><th>न्यूनतम</th></tr></thead>
-    <tbody>${low.length?low.map(p=>`<tr><td>${p.name}</td><td><span class="bdg br">${p.stock} ${p.unit}</span></td><td>${p.minStock||5}</td></tr>`).join(''):'<tr><td colspan="3" style="text-align:center;padding:1rem;color:var(--t2)">सब ठीक है ✓</td></tr>'}</tbody>
+  <div class="card"><div class="ct" style="display:flex;justify-content:space-between">उधार बकाया <button class="btn bts btp" onclick="sw('udhar')">सब देखें →</button></div>
+    <table><thead><tr><th>कस्टमर</th><th>बकाया</th><th></th></tr></thead>
+    <tbody>${D.customers.filter(c=>+c.udhar>0).sort((a,b)=>b.udhar-a.udhar).slice(0,5).map(c=>`<tr><td>${c.name}</td><td><span class="udhar-amt">${fmt(c.udhar)}</span></td><td><button class="btn bts btp" onclick="openUdharPayModal(${c.id})">जमा करें</button></td></tr>`).join('')||'<tr><td colspan="3" style="text-align:center;padding:1rem;color:var(--t2)">कोई बकाया नहीं ✓</td></tr>'}</tbody>
     </table></div>
 </div>`;
 }
@@ -477,66 +504,64 @@ function renderBilling(){
   const el=document.getElementById('tab-billing');if(!el)return;
   const s=D.settings||{};
   const today=new Date().toISOString().split('T')[0];
+  const pfx=(s.billPrefix||'').trim();
   el.innerHTML=`
 <div class="g2"><div>
   <div class="card"><div class="ct">बिल विवरण</div>
     <div class="g3">
       <div class="fg"><label>बिल नंबर</label>
         <div class="fr" style="gap:4px">
-          <span style="padding:9px 10px;background:var(--bg2);border-radius:8px;border:1px solid var(--bdr);font-weight:700;white-space:nowrap;font-size:13px">${s.billPrefix||'INV'}-</span>
-          <input id="bnum" type="number" value="${s.nextBill||1001}" style="width:80px">
+          ${pfx?`<span style="padding:9px 10px;background:var(--bg2);border-radius:8px;border:1px solid var(--bdr);font-weight:700;white-space:nowrap;font-size:13px">${pfx}-</span>`:''}
+          <input id="bnum" type="number" value="${s.nextBill||1}" placeholder="बिल नंबर" style="flex:1;min-width:0">
         </div>
       </div>
       <div class="fg"><label>तारीख</label><input type="date" id="bdate" value="${today}"></div>
       <div class="fg"><label>भुगतान</label>
-        <select id="bpay"><option>नकद</option><option>UPI</option><option>क्रेडिट</option><option>चेक</option></select>
+        <select id="bpay"><option>नकद</option><option>UPI</option><option>उधार</option><option>क्रेडिट</option><option>चेक</option></select>
       </div>
     </div>
     <div class="fg"><label>कस्टमर</label>
-      <select id="bcust"><option value="">-- वॉक-इन कस्टमर --</option>
-        ${D.customers.map(c=>`<option value="${c.id}">${c.name}${c.phone?' ('+c.phone+')':''}</option>`).join('')}
-      </select>
-    </div>
-  </div>
-
-  <div class="card"><div class="ct" style="margin-bottom:.5rem">🔢 GST रिवर्स कैलकुलेटर</div>
-    <div class="rbox"><div class="rtitle">टोटल राशि डालें → Taxable amount अपने आप निकलेगी</div>
-      <div class="rrow"><label>टोटल (GST सहित) ₹</label><input type="number" id="rct" placeholder="0" oninput="rcalc()"></div>
-      <div class="rrow"><label>GST दर %</label>
-        <select id="rcg" onchange="rcalc()"><option value="5">5%</option><option value="12">12%</option><option value="18" selected>18%</option><option value="28">28%</option></select>
+      <div class="fr" style="gap:6px">
+        <select id="bcust" style="flex:1"><option value="">-- वॉक-इन कस्टमर --</option>
+          ${D.customers.map(c=>`<option value="${c.id}">${c.name}${c.phone?' ('+c.phone+')':''}${+c.udhar>0?' [बकाया:'+fmt(c.udhar)+']':''}</option>`).join('')}
+        </select>
+        <button class="btn bts btp" onclick="openQuickCust()" style="flex-shrink:0" title="नया कस्टमर जोड़ें">+ कस्टमर</button>
       </div>
-      <div class="fr" style="margin-top:.5rem;flex-wrap:wrap;gap:6px">
-        <div class="rout" id="rctax">Taxable: ₹0.00</div>
-        <div class="rout" id="rcgst">GST: ₹0.00</div>
-        <div class="rout" id="rccg">CGST: ₹0.00</div>
-        <div class="rout" id="rcsg">SGST: ₹0.00</div>
-      </div>
-      <button class="btn btp bts" style="margin-top:.625rem" onclick="applyRC()">↓ बिल में भरें</button>
     </div>
   </div>
 
   <div class="card"><div class="ct">आइटम जोड़ें</div>
-    <div class="g3">
-      <div class="fg"><label>प्रोडक्ट</label>
-        <select id="sp" onchange="fillP()"><option value="">-- चुनें --</option>
-          ${D.products.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}
-        </select>
+    <div style="display:grid;grid-template-columns:2fr 65px 80px 75px 85px 36px;gap:5px;align-items:end;margin-bottom:.375rem">
+      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">प्रोडक्ट नाम</label>
+        <div class="ac-wrap">
+          <input id="sp-text" placeholder="नाम टाइप करें..." oninput="prodAC(this.value)" autocomplete="off" onkeydown="prodACKey(event)">
+          <div class="ac-drop" id="ac-drop" style="display:none"></div>
+        </div>
       </div>
-      <div class="fg"><label>मात्रा</label><input type="number" id="sq" value="1" min="1"></div>
-      <div class="fg"><label>दर (₹)</label><input type="number" id="sr" placeholder="0.00"></div>
+      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">मात्रा</label>
+        <input type="number" id="sq" value="1" min="1" oninput="syncTotal()">
+      </div>
+      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">दर (₹)</label>
+        <input type="number" id="sr" placeholder="0" oninput="syncTotal()">
+      </div>
+      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">GST %</label>
+        <select id="sg" onchange="syncTotal()"><option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18" selected>18%</option><option value="28">28%</option></select>
+      </div>
+      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2);font-weight:600;color:var(--acc)">टोटल ₹ ✦</label>
+        <input type="number" id="stot" placeholder="0" class="total-inp" oninput="syncRate()">
+      </div>
+      <div class="fg" style="margin:0"><label style="font-size:11px">&nbsp;</label>
+        <button class="btn btp" onclick="addItem()" style="padding:9px 8px;font-size:18px;line-height:1">+</button>
+      </div>
     </div>
-    <div class="g3">
-      <div class="fg"><label>GST %</label>
-        <select id="sg"><option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18" selected>18%</option><option value="28">28%</option></select>
-      </div>
-      <div class="fg"><label>HSN कोड</label>
-        <input id="sh" placeholder="नाम से खोजें..." oninput="hsnS(this.value,'hsg','sh','sg')">
-      </div>
-      <div class="fg"><label>&nbsp;</label><button class="btn btp" onclick="addItem()">+ जोड़ें</button></div>
+    <div style="font-size:11px;color:var(--t2);margin-bottom:.625rem">
+      HSN: <input id="sh" placeholder="खोजें..." style="width:130px;font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1)" oninput="hsnS(this.value,'hsg','sh','sg')">
+      <span style="margin-left:8px;color:var(--acc)">✦ टोटल डालने से दर अपने आप निकलेगी</span>
     </div>
-    <div id="hsg" style="display:none;margin-bottom:.625rem"></div>
-    <table><thead><tr><th>प्रोडक्ट</th><th>मात्रा</th><th>दर</th><th>GST</th><th>कुल</th><th></th></tr></thead>
-    <tbody id="bi-body"></tbody></table>
+    <div id="hsg" style="display:none;margin-bottom:.5rem"></div>
+    <div style="overflow-x:auto">
+    <table><thead><tr><th>प्रोडक्ट</th><th>मात्रा</th><th>दर</th><th>GST</th><th>Taxable</th><th>GST₹</th><th>कुल</th><th></th></tr></thead>
+    <tbody id="bi-body"></tbody></table></div>
     <div class="btots" style="margin-top:.75rem">
       <div class="r"><span>Taxable Amount</span><span id="tsub">₹0.00</span></div>
       <div class="r"><span>CGST</span><span id="tcg">₹0.00</span></div>
@@ -557,9 +582,94 @@ function renderBilling(){
   renderBillItems();
 }
 
-function rcalc(){const tot=+document.getElementById('rct').value||0,g=+document.getElementById('rcg').value||0,tx=tot/(1+g/100),ga=tot-tx;document.getElementById('rctax').textContent='Taxable: ₹'+tx.toFixed(2);document.getElementById('rcgst').textContent='GST: ₹'+ga.toFixed(2);document.getElementById('rccg').textContent='CGST: ₹'+(ga/2).toFixed(2);document.getElementById('rcsg').textContent='SGST: ₹'+(ga/2).toFixed(2)}
-function applyRC(){const tot=+document.getElementById('rct').value||0;if(!tot){alert('टोटल राशि डालें');return}const g=+document.getElementById('rcg').value||0;document.getElementById('sr').value=(tot/(1+g/100)).toFixed(2);document.getElementById('sg').value=g;document.getElementById('sq').value=1}
+// ── PRODUCT AUTOCOMPLETE ──
+let acIdx=-1;
+function prodAC(v){
+  const drop=document.getElementById('ac-drop');if(!drop)return;
+  acIdx=-1;
+  if(!v||v.length<1){drop.style.display='none';return}
+  const list=D.products.filter(p=>p.name.toLowerCase().includes(v.toLowerCase())).slice(0,8);
+  if(!list.length){drop.style.display='none';return}
+  drop.style.display='block';
+  drop.innerHTML=list.map((p,i)=>`<div class="ac-item" data-idx="${i}" onclick="pickProd(${p.id})">
+    <b>${p.name}</b><small>${fmt(p.sellPrice)} | GST:${p.gst}% | स्टॉक:${p.stock}${p.unit}</small>
+  </div>`).join('');
+}
+function pickProd(id){
+  const p=D.products.find(x=>x.id===id);if(!p)return;
+  document.getElementById('sp-text').value=p.name;
+  document.getElementById('sr').value=p.sellPrice;
+  document.getElementById('sg').value=p.gst;
+  document.getElementById('sh').value=p.hsn||'';
+  document.getElementById('ac-drop').style.display='none';
+  syncTotal();
+  document.getElementById('sq').focus();
+}
+function prodACKey(e){
+  const drop=document.getElementById('ac-drop');const items=drop?.querySelectorAll('.ac-item');
+  if(!items||!items.length)return;
+  if(e.key==='ArrowDown'){e.preventDefault();acIdx=Math.min(acIdx+1,items.length-1);items.forEach((x,i)=>x.classList.toggle('active',i===acIdx))}
+  else if(e.key==='ArrowUp'){e.preventDefault();acIdx=Math.max(acIdx-1,0);items.forEach((x,i)=>x.classList.toggle('active',i===acIdx))}
+  else if(e.key==='Enter'&&acIdx>=0){e.preventDefault();items[acIdx].click()}
+  else if(e.key==='Escape'){drop.style.display='none';acIdx=-1}
+}
+document.addEventListener('click',e=>{const d=document.getElementById('ac-drop');if(d&&!e.target.closest('.ac-wrap'))d.style.display='none'});
 
+// ── TOTAL ↔ RATE SYNC ──
+function syncTotal(){
+  const qty=+document.getElementById('sq')?.value||1;
+  const rate=+document.getElementById('sr')?.value||0;
+  const gst=+document.getElementById('sg')?.value||0;
+  const tot=document.getElementById('stot');
+  if(tot&&document.activeElement!==tot)tot.value=rate?( rate*qty*(1+gst/100)).toFixed(2):'';
+}
+function syncRate(){
+  const qty=+document.getElementById('sq')?.value||1;
+  const gst=+document.getElementById('sg')?.value||0;
+  const tot=+document.getElementById('stot')?.value||0;
+  if(!tot)return;
+  const r=document.getElementById('sr');
+  if(r)r.value=(tot/qty/(1+gst/100)).toFixed(2);
+}
+
+function addItem(){
+  const nameText=(document.getElementById('sp-text')?.value||'').trim();
+  if(!nameText){alert('प्रोडक्ट का नाम डालें');return}
+  const qty=+document.getElementById('sq').value||1;
+  const gst=+document.getElementById('sg').value||0;
+  let rate=+document.getElementById('sr').value||0;
+  const totInp=+document.getElementById('stot')?.value||0;
+  if(!rate&&totInp)rate=totInp/qty/(1+gst/100);
+  if(!rate){alert('दर या टोटल डालें');return}
+  // Auto-add to inventory if new product
+  let pId=null;
+  const existing=D.products.find(p=>p.name.toLowerCase()===nameText.toLowerCase());
+  if(existing){pId=existing.id}
+  else{
+    const np={id:Date.now(),name:nameText,barcode:'',hsn:document.getElementById('sh')?.value||'',gst,buyPrice:0,sellPrice:rate,stock:0,minStock:0,unit:'Pcs'};
+    D.products.push(np);pId=np.id;
+    sb.from('products').upsert({id:np.id,shop_id:currentShop.id,name:np.name,barcode:'',hsn:np.hsn,gst:np.gst,buy_price:0,sell_price:rate,stock:0,min_stock:0,unit:'Pcs'}).catch(()=>{});
+  }
+  const base=qty*rate,gstAmt=base*gst/100;
+  D.billItems.push({pId,name:nameText,qty,rate,gst,base,gstAmt,total:base+gstAmt,hsn:document.getElementById('sh')?.value||''});
+  document.getElementById('sp-text').value='';
+  document.getElementById('sq').value=1;
+  document.getElementById('sr').value='';
+  document.getElementById('stot').value='';
+  document.getElementById('sh').value='';
+  const hb=document.getElementById('hsg');if(hb)hb.style.display='none';
+  document.getElementById('sp-text').focus();
+  renderBillItems();
+}
+function renderBillItems(){
+  const tb=document.getElementById('bi-body');if(!tb)return;
+  const items=D.billItems||[];
+  if(!items.length)tb.innerHTML='<tr><td colspan="8" style="text-align:center;padding:1rem;color:var(--t2)">कोई आइटम नहीं</td></tr>';
+  else tb.innerHTML=items.map((item,i)=>`<tr><td>${item.name}${item.hsn?'<br><small style="color:var(--t3)">HSN:'+item.hsn+'</small>':''}</td><td>${item.qty}</td><td>${fmt(item.rate)}</td><td>${item.gst}%</td><td>${fmt(item.base)}</td><td>${fmt(item.gstAmt)}</td><td><b>${fmt(item.total)}</b></td><td><button class="btn bts btd" onclick="rmItem(${i})">✕</button></td></tr>`).join('');
+  const sub=items.reduce((s,i)=>s+i.base,0),gt=items.reduce((s,i)=>s+i.gstAmt,0);
+  const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v};
+  set('tsub',fmt(sub));set('tcg',fmt(gt/2));set('tsg',fmt(gt/2));set('tgr',fmt(sub+gt));
+}
 function hsnS(v,boxId,inpId,gstId){
   const box=document.getElementById(boxId);if(!box)return;
   if(!v||v.length<2){box.style.display='none';return}
@@ -574,31 +684,9 @@ function selHSN(code,gst,boxId,inpId,gstId){
   const g=document.getElementById(gstId);if(g)g.value=gst;
   const b=document.getElementById(boxId);if(b)b.style.display='none';
 }
-
-function fillP(){const id=+document.getElementById('sp').value;if(!id)return;const p=D.products.find(x=>x.id===id);if(p){document.getElementById('sr').value=p.sellPrice;document.getElementById('sg').value=p.gst;document.getElementById('sh').value=p.hsn||''}}
-
-function addItem(){
-  const qty=+document.getElementById('sq').value||1,rate=+document.getElementById('sr').value||0,gst=+document.getElementById('sg').value||0;
-  if(!rate){alert('दर डालें');return}
-  const pId=+document.getElementById('sp').value||null;
-  const name=pId?(D.products.find(p=>p.id===pId)?.name||'आइटम'):'आइटम';
-  const base=qty*rate,gstAmt=base*gst/100;
-  D.billItems.push({pId,name,qty,rate,gst,base,gstAmt,total:base+gstAmt,hsn:document.getElementById('sh').value});
-  document.getElementById('sp').value='';document.getElementById('sq').value=1;document.getElementById('sr').value='';document.getElementById('sh').value='';
-  const hb=document.getElementById('hsg');if(hb)hb.style.display='none';
-  renderBillItems();
-}
-function renderBillItems(){
-  const tb=document.getElementById('bi-body');if(!tb)return;
-  const items=D.billItems||[];
-  if(!items.length)tb.innerHTML='<tr><td colspan="6" style="text-align:center;padding:1rem;color:var(--t2)">कोई आइटम नहीं</td></tr>';
-  else tb.innerHTML=items.map((item,i)=>`<tr><td>${item.name}${item.hsn?'<br><small style="color:var(--t3)">HSN:'+item.hsn+'</small>':''}</td><td>${item.qty}</td><td>${fmt(item.rate)}</td><td>${item.gst}%</td><td>${fmt(item.total)}</td><td><button class="btn bts btd" onclick="rmItem(${i})">✕</button></td></tr>`).join('');
-  const sub=items.reduce((s,i)=>s+i.base,0),gt=items.reduce((s,i)=>s+i.gstAmt,0);
-  const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v};
-  set('tsub',fmt(sub));set('tcg',fmt(gt/2));set('tsg',fmt(gt/2));set('tgr',fmt(sub+gt));
-}
-function rmItem(i){D.billItems.splice(i,1);renderBillItems()}
 function clearBill(){D.billItems=[];renderBillItems();const p=document.getElementById('bpreview');if(p)p.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4rem 1rem;color:var(--t3);text-align:center"><p style="font-size:13px">बिल बनने के बाद यहाँ दिखेगा</p></div>'}
+
+function rmItem(i){D.billItems.splice(i,1);renderBillItems()}
 
 async function genBill(){
   const items=D.billItems||[];
@@ -609,18 +697,19 @@ async function genBill(){
   const cId=document.getElementById('bcust').value;
   const cust=cId?D.customers.find(c=>c.id===+cId):null;
   const payment=document.getElementById('bpay').value;
+  const isUdhar=payment==='उधार';
   const bill={id:billId,date:billDate,customer:cust?cust.name:'वॉक-इन',custId:cId||null,custGstin:cust?.gstin||'',custAddr:cust?.address||'',items:[...items],subtotal:sub,gstTotal:gt,grand,payment};
   D.bills.unshift(bill);D.settings.nextBill=billId+1;
-  if(cust)cust.totalPurchase=(cust.totalPurchase||0)+grand;
-  items.filter(i=>i.pId).forEach(({pId,qty})=>{const p=D.products.find(x=>x.id===pId);if(p)p.stock=Math.max(0,+p.stock-qty)});
+  if(cust){cust.totalPurchase=(cust.totalPurchase||0)+grand;if(isUdhar)cust.udhar=(+cust.udhar||0)+grand;}
+  items.filter(i=>i.pId).forEach(({pId,qty})=>{const p=D.products.find(x=>x.id===pId);if(p&&+p.stock>0)p.stock=Math.max(0,+p.stock-qty)});
   saveLocal();
   try{
     await sb.from('bills').upsert({id:billId,shop_id:currentShop.id,date:billDate,customer:bill.customer,cust_id:cust?.id||null,cust_gstin:bill.custGstin,cust_addr:bill.custAddr,items:bill.items,subtotal:sub,gst_total:gt,grand,payment});
     await sb.from('shops').update({settings:D.settings}).eq('id',currentShop.id);
-    if(cust)await sb.from('customers').update({total_purchase:cust.totalPurchase}).eq('id',cust.id);
-    for(const {pId,qty} of items.filter(i=>i.pId)){const p=D.products.find(x=>x.id===pId);if(p)await sb.from('products').update({stock:p.stock}).eq('id',pId)}
+    if(cust)await sb.from('customers').update({total_purchase:cust.totalPurchase,udhar:cust.udhar||0}).eq('id',cust.id);
+    for(const {pId,qty} of items.filter(i=>i.pId)){const p=D.products.find(x=>x.id===pId);if(p&&+p.stock>0)await sb.from('products').update({stock:p.stock}).eq('id',pId)}
     toast('बिल save हो गया ✓');
-  }catch(e){toast('Local save — sync बाद में होगा','warn')}
+  }catch(e){toast('Local save — sync बाद में','warn')}
   D.billItems=[];renderBillItems();showPreview(bill);
 }
 
@@ -649,7 +738,13 @@ function showPreview(bill){
     <div class="g"><span>कुल देय</span><span>₹${fmtN(bill.grand)}</span></div>
   </div>
   ${bankHtml}
-  <p style="text-align:center;margin-top:.875rem;font-size:11px;color:var(--t2)">धन्यवाद! फिर पधारें।</p>
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:1.5rem;padding-top:.875rem;border-top:1px dashed var(--bdr)">
+    <div style="font-size:11px;color:var(--t2)">धन्यवाद! फिर पधारें।</div>
+    <div style="text-align:center;width:160px">
+      <div style="height:52px;border-bottom:1px solid var(--t1);margin-bottom:4px"></div>
+      <div style="font-size:10px;color:var(--t2)">अधिकृत हस्ताक्षर</div>
+    </div>
+  </div>
 </div>
 <div class="fr no-print" style="margin-top:.875rem;justify-content:center">
   <button class="btn btp bts" onclick="window.print()">🖨️ प्रिंट</button>
@@ -676,7 +771,7 @@ function renderInv(){
     <div class="fg"><label>बिक्री मूल्य ₹</label><input id="ps" type="number" placeholder="0.00"></div>
   </div>
   <div class="g3" style="margin-bottom:.875rem">
-    <div class="fg"><label>स्टॉक मात्रा</label><input id="pst" type="number" placeholder="0"></div>
+    <div class="fg"><label>स्टॉक (वैकल्पिक)</label><input id="pst" type="number" placeholder="0 या खाली छोड़ें"></div>
     <div class="fg"><label>न्यूनतम स्टॉक</label><input id="pm" type="number" placeholder="5"></div>
     <div class="fg"><label>यूनिट</label><select id="pu"><option>Pcs</option><option>Kg</option><option>Ltr</option><option>Box</option><option>Pack</option></select></div>
   </div>
@@ -694,7 +789,12 @@ function renderInv(){
 function invRows(f=''){
   const list=D.products.filter(p=>p.name.toLowerCase().includes(f.toLowerCase()));
   if(!list.length)return'<tr><td colspan="9" style="text-align:center;padding:1.25rem;color:var(--t2)">कोई प्रोडक्ट नहीं — ऊपर से जोड़ें</td></tr>';
-  return list.map(p=>{const low=+p.stock<=+(p.minStock||5);return`<tr><td><b>${p.name}</b></td><td style="font-size:11px;color:var(--t2)">${p.barcode||'-'}</td><td>${p.hsn||'-'}</td><td>${p.gst}%</td><td>${fmt(p.buyPrice)}</td><td>${fmt(p.sellPrice)}</td><td>${p.stock} ${p.unit}</td><td>${low?'<span class="bdg br">कम</span>':'<span class="bdg bg">ठीक</span>'}</td><td><button class="btn bts btd" onclick="delProd(${p.id})">✕</button></td></tr>`}).join('')
+  return list.map(p=>{
+    const hasStock=+p.minStock>0;
+    const low=hasStock&&+p.stock<=+(p.minStock||5);
+    const stockDisp=+p.minStock>0?(p.stock+' '+p.unit):'-';
+    const status=hasStock?(low?'<span class="bdg br">कम</span>':'<span class="bdg bg">ठीक</span>'):'<span class="bdg" style="background:var(--bg2);color:var(--t2)">N/A</span>';
+    return`<tr><td><b>${p.name}</b></td><td style="font-size:11px;color:var(--t2)">${p.barcode||'-'}</td><td>${p.hsn||'-'}</td><td>${p.gst}%</td><td>${fmt(p.buyPrice)}</td><td>${fmt(p.sellPrice)}</td><td>${stockDisp}</td><td>${status}</td><td><button class="btn bts btd" onclick="delProd(${p.id})">✕</button></td></tr>`}).join('')
 }
 function filterInv(v){const t=document.getElementById('inv-tb');if(t)t.innerHTML=invRows(v)}
 async function addProd(){
@@ -719,19 +819,112 @@ function renderCust(){
   <div class="fg" style="margin-bottom:.875rem"><label>पता</label><input id="ca" placeholder="पूरा पता"></div>
   <button class="btn btp" onclick="addCust()">+ कस्टमर जोड़ें</button></div>
   <div class="card"><div class="ct">कस्टमर (${D.customers.length})</div>
-  <table><thead><tr><th>नाम</th><th>मोबाइल</th><th>GSTIN</th><th>कुल खरीद</th><th></th></tr></thead>
-  <tbody>${D.customers.length?D.customers.map(c=>`<tr><td><b>${c.name}</b></td><td>${c.phone||'-'}</td><td>${c.gstin||'-'}</td><td>${fmt(c.totalPurchase||0)}</td><td><button class="btn bts btd" onclick="delCust(${c.id})">✕</button></td></tr>`).join(''):'<tr><td colspan="5" style="text-align:center;padding:1.25rem;color:var(--t2)">कोई कस्टमर नहीं</td></tr>'}</tbody>
+  <table><thead><tr><th>नाम</th><th>मोबाइल</th><th>GSTIN</th><th>कुल खरीद</th><th>उधार बकाया</th><th></th></tr></thead>
+  <tbody>${D.customers.length?D.customers.map(c=>`<tr><td><b>${c.name}</b></td><td>${c.phone||'-'}</td><td>${c.gstin||'-'}</td><td>${fmt(c.totalPurchase||0)}</td><td>${+c.udhar>0?`<span class="udhar-amt">${fmt(c.udhar)}</span> <button class="btn bts btp" onclick="openUdharPayModal(${c.id})">जमा</button>`:'<span style="color:var(--ok-t)">✓ बकाया नहीं</span>'}</td><td><button class="btn bts btd" onclick="delCust(${c.id})">✕</button></td></tr>`).join(''):'<tr><td colspan="6" style="text-align:center;padding:1.25rem;color:var(--t2)">कोई कस्टमर नहीं</td></tr>'}</tbody>
   </table></div>`;
 }
 async function addCust(){
   const n=document.getElementById('cn').value.trim();if(!n){alert('नाम जरूरी है');return}
-  const c={id:Date.now(),name:n,phone:document.getElementById('cp').value,gstin:document.getElementById('cg').value,address:document.getElementById('ca').value,totalPurchase:0};
+  const c={id:Date.now(),name:n,phone:document.getElementById('cp').value,gstin:document.getElementById('cg').value,address:document.getElementById('ca').value,totalPurchase:0,udhar:0};
   D.customers.push(c);saveLocal();
-  try{await sb.from('customers').upsert({id:c.id,shop_id:currentShop.id,name:c.name,phone:c.phone,gstin:c.gstin,address:c.address,total_purchase:0});toast('कस्टमर save ✓')}
+  try{await sb.from('customers').upsert({id:c.id,shop_id:currentShop.id,name:c.name,phone:c.phone,gstin:c.gstin,address:c.address,total_purchase:0,udhar:0});toast('कस्टमर save ✓')}
   catch(e){toast('Local save','warn')}
   renderCust();
 }
 async function delCust(id){if(!confirm('कस्टमर मिटाएं?'))return;D.customers=D.customers.filter(c=>c.id!==id);saveLocal();try{await sb.from('customers').delete().eq('id',id)}catch(e){}renderCust()}
+
+// ── QUICK ADD CUSTOMER (billing page) ──
+function openQuickCust(){
+  document.getElementById('modal-root').innerHTML=`
+<div class="modal-wrap" onclick="if(event.target===this)closeModal()">
+<div class="modal-box">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+    <h3 style="font-size:15px;font-weight:600">नया कस्टमर जोड़ें</h3>
+    <button class="btn bts btd" onclick="closeModal()">✕</button>
+  </div>
+  <div class="fg"><label>नाम *</label><input id="qc-name" placeholder="पूरा नाम" autofocus></div>
+  <div class="fg"><label>मोबाइल</label><input id="qc-phone" type="tel" placeholder="10 अंक"></div>
+  <div class="fg"><label>GSTIN (वैकल्पिक)</label><input id="qc-gstin" placeholder="15 अंक"></div>
+  <button class="btn btp btn-block" style="margin-top:.5rem" onclick="quickSaveCust()">+ जोड़ें और बिल में चुनें</button>
+</div></div>`;
+}
+async function quickSaveCust(){
+  const name=document.getElementById('qc-name').value.trim();
+  if(!name){alert('नाम जरूरी है');return}
+  const c={id:Date.now(),name,phone:document.getElementById('qc-phone').value,gstin:document.getElementById('qc-gstin').value,address:'',totalPurchase:0,udhar:0};
+  D.customers.push(c);saveLocal();
+  try{await sb.from('customers').upsert({id:c.id,shop_id:currentShop.id,name:c.name,phone:c.phone,gstin:c.gstin,address:'',total_purchase:0,udhar:0});toast('कस्टमर जुड़ गया ✓')}
+  catch(e){toast('Local save','warn')}
+  closeModal();
+  const sel=document.getElementById('bcust');
+  if(sel){
+    const opt=document.createElement('option');opt.value=c.id;opt.textContent=c.name+(c.phone?' ('+c.phone+')':'');
+    sel.appendChild(opt);sel.value=c.id;
+  }
+}
+function closeModal(){document.getElementById('modal-root').innerHTML=''}
+
+// ── UDHAR TAB ──
+function renderUdhar(){
+  const el=document.getElementById('tab-udhar');if(!el)return;
+  const udharList=D.customers.filter(c=>+c.udhar>0).sort((a,b)=>b.udhar-a.udhar);
+  const totalBakaya=udharList.reduce((s,c)=>s+(+c.udhar||0),0);
+  el.innerHTML=`
+<div class="g2" style="margin-bottom:1rem">
+  <div class="sc"><div class="lbl">कुल बकाया</div><div class="val" style="color:var(--err-t)">${fmt(totalBakaya)}</div><div class="sub">${udharList.length} लोगों का</div></div>
+  <div class="sc"><div class="lbl">कुल कस्टमर</div><div class="val">${D.customers.length}</div><div class="sub">${D.customers.filter(c=>+c.udhar===0).length} का बकाया नहीं</div></div>
+</div>
+<div class="card">
+  <div class="ct">उधार बकाया सूची</div>
+  ${udharList.length?`
+  <table><thead><tr><th>कस्टमर</th><th>मोबाइल</th><th>बकाया राशि</th><th>WhatsApp</th><th></th></tr></thead>
+  <tbody>${udharList.map(c=>`<tr>
+    <td><b>${c.name}</b></td>
+    <td>${c.phone||'-'}</td>
+    <td><span class="udhar-amt">${fmt(c.udhar)}</span></td>
+    <td>${c.phone?`<a href="https://wa.me/91${c.phone}?text=${encodeURIComponent('नमस्ते '+c.name+' जी,\nआपका बकाया ₹'+fmtN(c.udhar)+' है।\nकृपया जल्द जमा करें।\n— '+D.settings.shopName)}" target="_blank"><button class="btn bts btg">📲</button></a>`:'<span style="color:var(--t3);font-size:11px">नंबर नहीं</span>'}</td>
+    <td><button class="btn bts btp" onclick="openUdharPayModal(${c.id})">जमा करें</button></td>
+  </tr>`).join('')}</tbody></table>`
+  :'<div style="text-align:center;padding:2rem;color:var(--ok-t);font-size:14px">✓ कोई बकाया नहीं — सब clear है!</div>'}
+</div>
+<div class="card">
+  <div class="ct">उधार इतिहास (हाल के बिल)</div>
+  <table><thead><tr><th>बिल नं</th><th>तारीख</th><th>कस्टमर</th><th>राशि</th></tr></thead>
+  <tbody>${D.bills.filter(b=>b.payment==='उधार').slice(0,10).map(b=>`<tr><td>${billNo(b.id)}</td><td>${new Date(b.date).toLocaleDateString('hi-IN')}</td><td>${b.customer}</td><td><span class="udhar-amt">${fmt(b.grand)}</span></td></tr>`).join('')||'<tr><td colspan="4" style="text-align:center;padding:1rem;color:var(--t2)">कोई उधार बिल नहीं</td></tr>'}</tbody>
+  </table>
+</div>`;
+}
+
+function openUdharPayModal(custId){
+  const c=D.customers.find(x=>x.id===custId);if(!c)return;
+  document.getElementById('modal-root').innerHTML=`
+<div class="modal-wrap" onclick="if(event.target===this)closeModal()">
+<div class="modal-box">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+    <h3 style="font-size:15px;font-weight:600">उधार जमा — ${c.name}</h3>
+    <button class="btn bts btd" onclick="closeModal()">✕</button>
+  </div>
+  <div style="background:var(--err-bg);color:var(--err-t);padding:.75rem 1rem;border-radius:9px;font-size:14px;margin-bottom:1rem;font-weight:600">
+    कुल बकाया: ${fmt(c.udhar)}
+  </div>
+  <div class="fg"><label>जमा राशि (₹)</label><input type="number" id="pay-amt" placeholder="0" max="${c.udhar}"></div>
+  <div class="fg"><label>भुगतान का तरीका</label>
+    <select id="pay-mode"><option>नकद</option><option>UPI</option><option>चेक</option></select>
+  </div>
+  <button class="btn btp btn-block" style="margin-top:.5rem" onclick="saveUdharPay(${custId})">✓ जमा करें</button>
+</div></div>`;
+}
+async function saveUdharPay(custId){
+  const amt=+document.getElementById('pay-amt').value||0;
+  if(!amt||amt<=0){alert('राशि डालें');return}
+  const c=D.customers.find(x=>x.id===custId);if(!c)return;
+  const prevUdhar=+c.udhar||0;
+  c.udhar=Math.max(0,prevUdhar-amt);
+  saveLocal();
+  try{await sb.from('customers').update({udhar:c.udhar}).eq('id',custId);toast(`${fmt(amt)} जमा हो गया ✓`)}
+  catch(e){toast('Local save','warn')}
+  closeModal();renderDash();renderUdhar();renderCust();
+}
 
 // ── BILLS ──
 function renderBillsTab(){
@@ -803,10 +996,10 @@ function renderSettings(){
   <div class="hr"></div>
   <div class="ct" style="margin-bottom:.625rem">बिल नंबर सेटिंग</div>
   <div class="g3" style="margin-bottom:.875rem">
-    <div class="fg"><label>Prefix (उपसर्ग)</label><input id="spfx" value="${s.billPrefix||'INV'}" placeholder="INV, BILL, SR..."></div>
-    <div class="fg"><label>अगला बिल नंबर</label><input id="snxt" type="number" value="${s.nextBill||1001}"></div>
+    <div class="fg"><label>Prefix (उपसर्ग — वैकल्पिक)</label><input id="spfx" value="${s.billPrefix||''}" placeholder="जैसे INV, BILL, SR... या खाली रखें"></div>
+    <div class="fg"><label>अगला बिल नंबर</label><input id="snxt" type="number" value="${s.nextBill||1}"></div>
     <div class="fg"><label>बिल format दिखेगा</label>
-      <div style="padding:9px 12px;background:var(--bg2);border-radius:9px;font-size:14px;font-weight:700;color:var(--acc)">${s.billPrefix||'INV'}-${s.nextBill||1001}</div>
+      <div style="padding:9px 12px;background:var(--bg2);border-radius:9px;font-size:14px;font-weight:700;color:var(--acc)">${(s.billPrefix||'').trim()?((s.billPrefix||'').trim()+'-'+(s.nextBill||1)):(s.nextBill||1)}</div>
     </div>
   </div>
   <div class="hr"></div>
@@ -835,8 +1028,8 @@ async function saveSett(){
   Object.assign(D.settings,{
     shopName:document.getElementById('ss').value,gstin:document.getElementById('sgs').value,
     phone:document.getElementById('sph').value,state:document.getElementById('sst').value,
-    address:document.getElementById('sad').value,billPrefix:document.getElementById('spfx').value||'INV',
-    nextBill:+document.getElementById('snxt').value||1001,bankName:document.getElementById('sbn').value,
+    address:document.getElementById('sad').value,billPrefix:document.getElementById('spfx').value.trim(),
+    nextBill:+document.getElementById('snxt').value||1,bankName:document.getElementById('sbn').value,
     accountNo:document.getElementById('sac').value,ifsc:document.getElementById('sif').value,
     upiId:document.getElementById('supi').value
   });
