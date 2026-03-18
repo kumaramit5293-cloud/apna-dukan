@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>अपना दुकान — GST बिलिंग ऐप</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --acc:#1a56db;--accl:#e8f0fe;--acch:#1447c0;
+  --bg1:#fff;--bg2:#f9fafb;--bg3:#f3f4f6;
+  --t1:#111827;--t2:#6b7280;--t3:#9ca3af;
+  --bdr:#e5e7eb;--bdr2:#d1d5db;
+  --ok-bg:#f0fdf4;--ok-t:#166534;
+  --err-bg:#fef2f2;--err-t:#991b1b;
+  --warn-bg:#fffbeb;--warn-t:#92400e;
+  --info-bg:#eff6ff;--info-t:#1e40af
+}
+@media(prefers-color-scheme:dark){:root{
+  --bg1:#1f2937;--bg2:#111827;--bg3:#0f172a;
+  --t1:#f9fafb;--t2:#9ca3af;--t3:#6b7280;
+  --bdr:#374151;--bdr2:#4b5563;
+  --ok-bg:#052e16;--ok-t:#86efac;
+  --err-bg:#450a0a;--err-t:#fca5a5;
+  --warn-bg:#451a03;--warn-t:#fde68a;
+  --info-bg:#1e3a5f;--info-t:#93c5fd
+}}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg3);color:var(--t1);font-size:14px}
+
+/* ── AUTH ── */
+.auth-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem}
+.auth-card{background:var(--bg1);border:1px solid var(--bdr);border-radius:16px;padding:2rem;width:100%;max-width:420px;box-shadow:0 4px 24px rgba(0,0,0,.07)}
+.auth-logo{text-align:center;margin-bottom:1.5rem}
+.auth-logo h1{font-size:22px;font-weight:700;margin-bottom:.25rem}
+.auth-logo p{font-size:13px;color:var(--t2)}
+.auth-tabs{display:flex;border:1px solid var(--bdr);border-radius:10px;padding:3px;margin-bottom:1.5rem;background:var(--bg2)}
+.auth-tab{flex:1;padding:8px;text-align:center;font-size:13px;font-weight:500;border-radius:8px;cursor:pointer;color:var(--t2);transition:all .2s;user-select:none}
+.auth-tab.on{background:var(--bg1);color:var(--t1);box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.divider-text{display:flex;align-items:center;gap:8px;margin:.875rem 0;font-size:11px;color:var(--t2)}
+.divider-text::before,.divider-text::after{content:'';flex:1;height:1px;background:var(--bdr)}
+.alert{padding:.75rem 1rem;border-radius:9px;font-size:13px;margin-bottom:.875rem;line-height:1.5}
+.alert-err{background:var(--err-bg);color:var(--err-t);border:1px solid #fecaca}
+.alert-ok{background:var(--ok-bg);color:var(--ok-t);border:1px solid #bbf7d0}
+.alert-info{background:var(--info-bg);color:var(--info-t)}
+
+/* ── FORMS ── */
+.fg{display:flex;flex-direction:column;gap:4px;margin-bottom:.75rem}
+.fg label{font-size:12px;font-weight:500;color:var(--t2)}
+input,select,textarea{font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%;transition:border-color .15s}
+input:focus,select:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(26,86,219,.1)}
+
+/* ── BUTTONS ── */
+.btn{font-size:13px;padding:9px 16px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);cursor:pointer;transition:all .15s;white-space:nowrap;font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn:hover:not(:disabled){background:var(--bg2)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btp{background:var(--acc);color:#fff;border-color:var(--acc)}.btp:hover:not(:disabled){background:var(--acch)}
+.btg{background:#25d366;color:#fff;border-color:#25d366}
+.bto{background:#217346;color:#fff;border-color:#217346}
+.btgoog{background:var(--bg1);color:var(--t1);border-color:var(--bdr2)}
+.bts{font-size:12px;padding:6px 11px}
+.btd{color:var(--err-t);border-color:var(--bdr)}.btd:hover{background:var(--err-bg)}
+.btn-block{width:100%}
+.hr{border:none;border-top:1px solid var(--bdr);margin:.875rem 0}
+
+/* ── APP SHELL ── */
+.app{display:flex;height:100vh;overflow:hidden}
+.sidebar{width:200px;background:var(--bg1);border-right:1px solid var(--bdr);display:flex;flex-direction:column;flex-shrink:0}
+.shop-hdr{padding:.875rem 1rem;border-bottom:1px solid var(--bdr)}
+.shop-hdr .sname{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shop-hdr .gstin{font-size:10px;color:var(--t2);margin-top:1px}
+.sync-badge{margin:.5rem .75rem .25rem;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:500}
+.sync-ok{background:var(--ok-bg);color:var(--ok-t)}
+.sync-off{background:var(--warn-bg);color:var(--warn-t)}
+.nav{padding:.55rem 1rem;cursor:pointer;font-size:13px;color:var(--t2);border-left:3px solid transparent;transition:all .15s;user-select:none}
+.nav:hover{background:var(--bg2);color:var(--t1)}
+.nav.on{background:var(--accl);color:var(--acc);border-left-color:var(--acc);font-weight:500}
+.sidebar-footer{margin-top:auto;border-top:1px solid var(--bdr);padding:.625rem}
+.user-pill{display:flex;align-items:center;gap:8px;padding:.5rem .75rem;border-radius:8px;cursor:pointer;background:var(--bg2);transition:background .15s}
+.user-pill:hover{background:var(--bg3)}
+.avatar{width:28px;height:28px;border-radius:50%;background:var(--acc);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.uname{font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.uemail{font-size:10px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.topbar{padding:.75rem 1.25rem;background:var(--bg1);border-bottom:1px solid var(--bdr);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.topbar h1{font-size:15px;font-weight:600}
+.content{flex:1;overflow-y:auto;padding:1.25rem}
+.tab{display:none}.tab.on{display:block}
+
+/* ── LAYOUT ── */
+.g4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:1.25rem}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:1rem}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:.75rem}
+@media(max-width:720px){.g2,.g3,.g4{grid-template-columns:1fr}.app{flex-direction:column}.sidebar{width:100%;height:auto}.sidebar-footer{display:none}}
+.card{background:var(--bg1);border-radius:12px;border:1px solid var(--bdr);padding:1rem 1.25rem;margin-bottom:1rem}
+.ct{font-size:13px;font-weight:600;margin-bottom:.875rem;color:var(--t1)}
+.sc{background:var(--bg2);border-radius:9px;padding:.875rem 1rem}
+.sc .lbl{font-size:11px;color:var(--t2);margin-bottom:3px}
+.sc .val{font-size:20px;font-weight:700;color:var(--t1)}
+.sc .sub{font-size:11px;color:var(--t3);margin-top:2px}
+table{width:100%;font-size:12px;border-collapse:collapse}
+th{text-align:left;padding:6px 10px;background:var(--bg2);color:var(--t2);font-weight:500;font-size:11px}
+td{padding:7px 10px;border-bottom:1px solid var(--bdr);color:var(--t1)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--bg2)}
+.bdg{display:inline-block;font-size:11px;padding:2px 8px;border-radius:5px;font-weight:500}
+.bg{background:var(--ok-bg);color:var(--ok-t)}
+.br{background:var(--err-bg);color:var(--err-t)}
+.bb{background:var(--info-bg);color:var(--info-t)}
+.by{background:var(--warn-bg);color:var(--warn-t)}
+.fr{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rbox{background:var(--bg2);border-radius:9px;padding:.875rem;margin-bottom:.875rem}
+.rbox .rtitle{font-size:11px;font-weight:600;color:var(--t2);margin-bottom:.625rem}
+.rrow{display:flex;align-items:center;gap:8px;margin-bottom:.5rem}
+.rrow label{font-size:12px;color:var(--t2);min-width:130px}
+.rrow input,.rrow select{max-width:120px}
+.rout{font-size:13px;font-weight:600;padding:5px 10px;background:var(--bg1);border-radius:8px;border:1px solid var(--bdr)}
+.pill{display:inline-block;font-size:11px;padding:2px 9px;border-radius:20px;border:1px solid var(--bdr2);cursor:pointer;margin:2px}
+.pill:hover{background:var(--accl);border-color:var(--acc);color:var(--acc)}
+.btots .r{display:flex;justify-content:space-between;padding:3px 0;font-size:13px;color:var(--t2)}
+.btots .g{display:flex;justify-content:space-between;font-size:15px;font-weight:700;border-top:1px solid var(--bdr);margin-top:4px;padding-top:7px;color:var(--t1)}
+.bprev{background:var(--bg1);border:1px solid var(--bdr);border-radius:12px;padding:1.25rem;max-width:560px;margin:0 auto}
+.bph{text-align:center;border-bottom:1px dashed var(--bdr);padding-bottom:.75rem;margin-bottom:.75rem}
+.bph h2{font-size:16px;font-weight:700}
+.bph p{font-size:11px;color:var(--t2);margin-top:2px}
+.bmeta{display:flex;justify-content:space-between;font-size:11px;color:var(--t2);margin-bottom:.75rem}
+#toast{position:fixed;bottom:1.5rem;right:1.5rem;padding:.75rem 1.25rem;border-radius:10px;font-size:13px;font-weight:500;z-index:9999;display:none;border:1px solid var(--bdr);background:var(--bg1);max-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.15)}
+.loader{width:16px;height:16px;border:2px solid var(--bdr);border-top-color:var(--acc);border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media print{.sidebar,.topbar,.no-print{display:none!important}.bprev{border:none;padding:0}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="toast"></div>
+<script>
+// ============================================================
+//  !! यहाँ सिर्फ अपनी Supabase details बदलें !!
+// ============================================================
+const SB_URL = 'https://ouusbkidjfxnyoertlhz.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im91dXNia2lkamZ4bnlvZXJ0bGh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NzcwMDMsImV4cCI6MjA4OTM1MzAwM30.qk0t2dSFCxh_0emTaVPPUKFbFII0wpIKwB7MRR_Wa8Y';
+// ============================================================
+
+const HSN_DB=[
+  {code:'3401',desc:'Soap, surface-active products',gst:18,keys:['soap','sabun','dettol','lifebuoy']},
+  {code:'3402',desc:'Detergent, washing',gst:18,keys:['detergent','surf','ariel','washing','rin']},
+  {code:'3306',desc:'Toothpaste, oral hygiene',gst:12,keys:['toothpaste','colgate','dant','pepsodent']},
+  {code:'2501',desc:'Salt (edible)',gst:5,keys:['salt','namak']},
+  {code:'1006',desc:'Rice',gst:5,keys:['rice','chawal','basmati']},
+  {code:'1001',desc:'Wheat, flour, atta',gst:0,keys:['wheat','atta','maida','flour']},
+  {code:'0402',desc:'Milk, dairy',gst:5,keys:['milk','doodh','amul','dairy']},
+  {code:'2106',desc:'Food preparations, biscuits',gst:18,keys:['biscuit','chips','parle','snack','namkeen']},
+  {code:'2202',desc:'Soft drinks',gst:28,keys:['cold drink','pepsi','coke','soda']},
+  {code:'3004',desc:'Medicines',gst:12,keys:['medicine','dawa','tablet','syrup','capsule']},
+  {code:'8517',desc:'Mobile phones',gst:18,keys:['mobile','phone','smartphone']},
+  {code:'8471',desc:'Computers, laptops',gst:18,keys:['laptop','computer','pc']},
+  {code:'6109',desc:'T-shirts, garments',gst:12,keys:['tshirt','shirt','kapda','cloth']},
+  {code:'6403',desc:'Footwear',gst:18,keys:['shoes','sandal','chappal','footwear']},
+  {code:'3305',desc:'Hair care, shampoo',gst:18,keys:['shampoo','hair','oil','baal']},
+  {code:'4901',desc:'Books, printed matter',gst:0,keys:['book','kitab','notebook','diary']},
+  {code:'7323',desc:'Steel utensils',gst:12,keys:['utensil','bartan','steel','plate']},
+  {code:'0901',desc:'Tea, coffee',gst:5,keys:['tea','chai','coffee']},
+  {code:'3808',desc:'Insecticides',gst:18,keys:['insecticide','hit','mosquito','keet']},
+  {code:'9503',desc:'Toys, games',gst:12,keys:['toy','game','khilona']}
+];
+
+let sb, currentUser=null, currentShop=null, activeTab='dashboard';
+let D={products:[],customers:[],bills:[],billItems:[],settings:{}};
+let syncOk=false;
+
+sb = window.supabase.createClient(SB_URL, SB_KEY);
+
+// ── UTILS ──
+const fmt=n=>'₹'+parseFloat(n||0).toFixed(2);
+const fmtN=n=>parseFloat(n||0).toFixed(2);
+const billNo=n=>(D.settings.billPrefix||'INV')+'-'+n;
+function saveLocal(){if(currentShop)localStorage.setItem('ld_'+currentShop,JSON.stringify({...D,billItems:D.billItems||[]}))}
+function loadLocal(){const d=localStorage.getItem('ld_'+currentShop);if(d){const p=JSON.parse(d);D={...p,billItems:p.billItems||[]}}}
+function toast(msg,type='ok'){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';t.style.color=type==='err'?'var(--err-t)':type==='warn'?'var(--warn-t)':'var(--ok-t)';clearTimeout(t._to);t._to=setTimeout(()=>t.style.display='none',3500)}
+function updSync(ok){syncOk=ok;const el=document.getElementById('sync-dot');if(el){el.className='sync-badge '+(ok?'sync-ok':'sync-off');el.textContent=ok?'● Cloud sync चालू':'● Offline mode'}}
+function setAlert(id,msg,type='err'){const el=document.getElementById(id);if(el)el.innerHTML=msg?`<div class="alert alert-${type}">${msg}</div>`:'';}
+
+// ── INIT ──
+async function renderRoot(){
+  document.getElementById('root').innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh"><div class="loader"></div></div>';
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session){renderAuth('login');return;}
+  currentUser=session.user;
+  await loadShopForUser();
+}
+
+// ── AUTH SCREEN ──
+function renderAuth(tab='login'){
+  document.getElementById('root').innerHTML=`
+<div class="auth-wrap">
+<div class="auth-card">
+  <div class="auth-logo">
+    <div style="font-size:36px;margin-bottom:.5rem">🏪</div>
+    <h1>अपना दुकान</h1>
+    <p>GST बिलिंग ऐप — Windows & Android</p>
+  </div>
+
+  <div class="auth-tabs">
+    <div class="auth-tab ${tab==='login'?'on':''}" onclick="renderAuth('login')">Login</div>
+    <div class="auth-tab ${tab==='signup'?'on':''}" onclick="renderAuth('signup')">नया account</div>
+  </div>
+
+  <div id="auth-alert"></div>
+
+  ${tab==='login'?`
+    <div class="fg"><label>Email address</label>
+      <input id="a-email" type="email" placeholder="aapka@gmail.com" autocomplete="email">
+    </div>
+    <div class="fg"><label>Password</label>
+      <input id="a-pass" type="password" placeholder="Password" autocomplete="current-password"
+        onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <button class="btn btp btn-block" id="auth-btn" onclick="doLogin()">Login करें →</button>
+    <p style="text-align:center;font-size:12px;color:var(--t2);margin-top:.75rem;cursor:pointer"
+      onclick="renderForgot()">🔑 Password भूल गए?</p>
+    <div class="divider-text">या</div>
+    <button class="btn btgoog btn-block" onclick="doGoogleLogin()">
+      <svg width="18" height="18" viewBox="0 0 24 24" style="flex-shrink:0">
+        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+      </svg>
+      Google से Login करें
+    </button>
+  `:`
+    <div class="fg"><label>दुकान का नाम *</label>
+      <input id="a-shop" placeholder="जैसे: ShreeRam Traders">
+    </div>
+    <div class="fg"><label>Email address *</label>
+      <input id="a-email" type="email" placeholder="aapka@gmail.com" autocomplete="email">
+    </div>
+    <div class="fg"><label>Password * (कम से कम 6 अक्षर)</label>
+      <input id="a-pass" type="password" placeholder="Password बनाएं" autocomplete="new-password"
+        onkeydown="if(event.key==='Enter')doSignup()">
+    </div>
+    <div class="fg"><label>GSTIN (वैकल्पिक)</label>
+      <input id="a-gstin" placeholder="15 अंक का GSTIN">
+    </div>
+    <div class="fg"><label>मोबाइल नंबर (वैकल्पिक)</label>
+      <input id="a-phone" type="tel" placeholder="10 अंक">
+    </div>
+    <button class="btn btp btn-block" id="auth-btn" onclick="doSignup()">Account बनाएं →</button>
+    <div class="divider-text">या</div>
+    <button class="btn btgoog btn-block" onclick="doGoogleLogin()">
+      <svg width="18" height="18" viewBox="0 0 24 24" style="flex-shrink:0">
+        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66 2.84z"/>
+        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+      </svg>
+      Google से Signup करें
+    </button>
+    <p style="font-size:11px;color:var(--t2);text-align:center;margin-top:.75rem">
+      Google से signup करने पर बाद में दुकान का नाम Settings में डालें
+    </p>
+  `}
+</div>
+</div>`;
+}
+
+function renderForgot(){
+  document.getElementById('root').innerHTML=`
+<div class="auth-wrap"><div class="auth-card">
+  <div class="auth-logo"><div style="font-size:32px;margin-bottom:.5rem">🔑</div>
+    <h1>Password Reset</h1><p>Email पर reset link जाएगा</p>
+  </div>
+  <div id="auth-alert"></div>
+  <div class="fg"><label>Email address</label>
+    <input id="a-email" type="email" placeholder="aapka@gmail.com">
+  </div>
+  <button class="btn btp btn-block" onclick="doForgot()">Reset link भेजें</button>
+  <p style="text-align:center;font-size:12px;color:var(--t2);margin-top:.875rem;cursor:pointer"
+    onclick="renderAuth('login')">← वापस Login</p>
+</div></div>`;
+}
+
+// ── AUTH ACTIONS ──
+async function doLogin(){
+  const email=document.getElementById('a-email').value.trim();
+  const pass=document.getElementById('a-pass').value;
+  if(!email||!pass){setAlert('auth-alert','Email और Password दोनों डालें');return;}
+  const btn=document.getElementById('auth-btn');
+  btn.disabled=true;btn.innerHTML='<span class="loader"></span> जाँच हो रही है...';
+  const {data,error}=await sb.auth.signInWithPassword({email,password:pass});
+  if(error){setAlert('auth-alert',error.message==='Invalid login credentials'?'Email या Password गलत है':error.message);btn.disabled=false;btn.textContent='Login करें →';return;}
+  currentUser=data.user;
+  await loadShopForUser();
+}
+
+async function doSignup(){
+  const shopName=document.getElementById('a-shop').value.trim();
+  const email=document.getElementById('a-email').value.trim();
+  const pass=document.getElementById('a-pass').value;
+  const gstin=(document.getElementById('a-gstin')?.value||'').trim();
+  const phone=(document.getElementById('a-phone')?.value||'').trim();
+  if(!shopName){setAlert('auth-alert','दुकान का नाम जरूरी है');return;}
+  if(!email){setAlert('auth-alert','Email जरूरी है');return;}
+  if(!pass||pass.length<6){setAlert('auth-alert','Password कम से कम 6 अक्षर का होना चाहिए');return;}
+  const btn=document.getElementById('auth-btn');
+  btn.disabled=true;btn.innerHTML='<span class="loader"></span> Account बन रहा है...';
+  const {data,error}=await sb.auth.signUp({
+    email,password:pass,
+    options:{data:{shop_name:shopName,gstin,phone}}
+  });
+  if(error){
+    setAlert('auth-alert',error.message.includes('already registered')?'यह Email पहले से registered है — Login करें':error.message);
+    btn.disabled=false;btn.textContent='Account बनाएं →';return;
+  }
+  if(data.user&&!data.session){
+    setAlert('auth-alert','✓ Confirmation email भेजा गया! Email check करें और link पर click करने के बाद login करें।','ok');
+    btn.disabled=false;btn.textContent='Account बनाएं →';return;
+  }
+  currentUser=data.user;
+  await createShopInDB(shopName,gstin,phone,data.user.id);
+  await loadShopForUser();
+}
+
+async function doGoogleLogin(){
+  const {error}=await sb.auth.signInWithOAuth({
+    provider:'google',
+    options:{redirectTo:window.location.href}
+  });
+  if(error)setAlert('auth-alert','Google login error: '+error.message);
+}
+
+async function doForgot(){
+  const email=document.getElementById('a-email').value.trim();
+  if(!email){setAlert('auth-alert','Email डालें');return;}
+  const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:window.location.href});
+  if(error){setAlert('auth-alert',error.message);return;}
+  setAlert('auth-alert','✓ Reset link भेज दिया! Email check करें।','ok');
+}
+
+async function doLogout(){
+  await sb.auth.signOut();
+  currentUser=null;currentShop=null;
+  D={products:[],customers:[],bills:[],billItems:[],settings:{}};
+  renderAuth('login');
+}
+
+// ── SHOP SETUP ──
+async function createShopInDB(shopName,gstin,phone,userId){
+  const shopId='shop_'+userId;
+  const settings={shopName,gstin,phone,state:'Bihar',address:'',bankName:'',accountNo:'',ifsc:'',upiId:'',billPrefix:'INV',nextBill:1001};
+  await sb.from('shops').upsert({id:shopId,name:shopName,gstin,owner_id:userId,settings});
+}
+
+async function loadShopForUser(){
+  const {data,error}=await sb.from('shops').select('*').eq('owner_id',currentUser.id).single();
+  if(error||!data){
+    const meta=currentUser.user_metadata||{};
+    const shopName=meta.shop_name||meta.full_name||currentUser.email.split('@')[0];
+    const gstin=meta.gstin||'';
+    const phone=meta.phone||'';
+    await createShopInDB(shopName,gstin,phone,currentUser.id);
+    const {data:d2}=await sb.from('shops').select('*').eq('owner_id',currentUser.id).single();
+    currentShop=d2;
+  }else{
+    currentShop=data;
+  }
+  D.settings=currentShop?.settings||{shopName:'दुकान',gstin:'',phone:'',state:'Bihar',address:'',bankName:'',accountNo:'',ifsc:'',upiId:'',billPrefix:'INV',nextBill:1001};
+  if(!D.billItems)D.billItems=[];
+  loadLocal();
+  renderApp();
+  syncAll();
+}
+
+// ── SYNC ──
+async function syncAll(){
+  try{
+    const [pr,cu,bi,sh]=await Promise.all([
+      sb.from('products').select('*').eq('shop_id',currentShop.id).order('id'),
+      sb.from('customers').select('*').eq('shop_id',currentShop.id).order('id'),
+      sb.from('bills').select('*').eq('shop_id',currentShop.id).order('date',{ascending:false}),
+      sb.from('shops').select('settings').eq('id',currentShop.id).single()
+    ]);
+    if(pr.error)throw pr.error;
+    D.products=(pr.data||[]).map(p=>({id:p.id,name:p.name,barcode:p.barcode,hsn:p.hsn,gst:p.gst,buyPrice:p.buy_price,sellPrice:p.sell_price,stock:p.stock,minStock:p.min_stock,unit:p.unit}));
+    D.customers=(cu.data||[]).map(c=>({id:c.id,name:c.name,phone:c.phone,gstin:c.gstin,address:c.address,totalPurchase:c.total_purchase}));
+    D.bills=(bi.data||[]).map(b=>({id:b.id,date:b.date,customer:b.customer,custId:b.cust_id,custGstin:b.cust_gstin,custAddr:b.cust_addr,items:b.items,subtotal:b.subtotal,gstTotal:b.gst_total,grand:b.grand,payment:b.payment}));
+    if(sh.data?.settings)D.settings={...D.settings,...sh.data.settings};
+    if(!D.billItems)D.billItems=[];
+    saveLocal();updSync(true);renderAllTabs();toast('Sync हो गया ✓');
+  }catch(e){updSync(false);toast('Offline mode — local data','warn');}
+}
+
+// ── APP SHELL ──
+function renderApp(){
+  const s=D.settings||{};
+  const email=currentUser?.email||'';
+  const uname=s.shopName||email.split('@')[0];
+  const tabs=['dashboard','billing','inventory','customers','bills','reports','settings'];
+  const labels=['डैशबोर्ड','GST बिल','इनवेंटरी','कस्टमर','बिल इतिहास','रिपोर्ट','सेटिंग्स'];
+  document.getElementById('root').innerHTML=`
+<div class="app">
+<div class="sidebar">
+  <div class="shop-hdr">
+    <div class="sname">${s.shopName||'दुकान'}</div>
+    <div class="gstin">${s.gstin||'GSTIN नहीं'}</div>
+  </div>
+  <div class="sync-badge sync-off" id="sync-dot">● Syncing...</div>
+  ${tabs.map((t,i)=>`<div class="nav${activeTab===t?' on':''}" onclick="sw('${t}')">${labels[i]}</div>`).join('')}
+  <div class="sidebar-footer">
+    <div class="user-pill" onclick="if(confirm('Logout करें?'))doLogout()">
+      <div class="avatar">${uname.charAt(0).toUpperCase()}</div>
+      <div style="flex:1;overflow:hidden">
+        <div class="uname">${uname}</div>
+        <div class="uemail">${email}</div>
+      </div>
+      <span style="font-size:11px;color:var(--t3)">↩</span>
+    </div>
+  </div>
+</div>
+<div class="main">
+  <div class="topbar">
+    <h1 id="ptitle">${labels[tabs.indexOf(activeTab)]}</h1>
+    <div class="fr">
+      <button class="btn bts" onclick="syncAll()" title="Cloud से sync करें">↻ Sync</button>
+      <button class="btn btp bts" onclick="sw('billing')">+ नया बिल</button>
+    </div>
+  </div>
+  <div class="content">
+    ${tabs.map(t=>`<div id="tab-${t}" class="tab${activeTab===t?' on':''}"></div>`).join('')}
+  </div>
+</div>
+</div>`;
+  renderAllTabs();updSync(syncOk);
+}
+
+function sw(id){
+  activeTab=id;
+  const L={dashboard:'डैशबोर्ड',billing:'GST बिल बनाएं',inventory:'इनवेंटरी',customers:'कस्टमर',bills:'बिल इतिहास',reports:'रिपोर्ट',settings:'सेटिंग्स'};
+  const el=document.getElementById('ptitle');if(el)el.textContent=L[id];
+  document.querySelectorAll('.nav').forEach((n,i)=>n.classList.toggle('on',['dashboard','billing','inventory','customers','bills','reports','settings'][i]===id));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  const tab=document.getElementById('tab-'+id);if(tab)tab.classList.add('on');
+  renderTab(id);
+}
+function renderTab(id){({dashboard:renderDash,billing:renderBilling,inventory:renderInv,customers:renderCust,bills:renderBillsTab,reports:renderReports,settings:renderSettings})[id]?.()}
+function renderAllTabs(){['dashboard','billing','inventory','customers','bills','reports','settings'].forEach(renderTab)}
+
+// ── DASHBOARD ──
+function renderDash(){
+  const el=document.getElementById('tab-dashboard');if(!el)return;
+  const today=new Date().toDateString();
+  const now=new Date();
+  const tb=D.bills.filter(b=>new Date(b.date).toDateString()===today);
+  const mb=D.bills.filter(b=>{const d=new Date(b.date);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();});
+  const low=D.products.filter(p=>+p.stock<=+(p.minStock||5));
+  el.innerHTML=`
+<div class="g4">
+  <div class="sc"><div class="lbl">आज की बिक्री</div><div class="val">${fmt(tb.reduce((s,b)=>s+b.grand,0))}</div><div class="sub">${tb.length} बिल आज</div></div>
+  <div class="sc"><div class="lbl">इस महीने</div><div class="val">${fmt(mb.reduce((s,b)=>s+b.grand,0))}</div><div class="sub">${mb.length} बिल</div></div>
+  <div class="sc"><div class="lbl">प्रोडक्ट</div><div class="val">${D.products.length}</div><div class="sub">इनवेंटरी में</div></div>
+  <div class="sc"><div class="lbl">कम स्टॉक</div><div class="val" style="color:var(--err-t)">${low.length}</div><div class="sub">अलर्ट</div></div>
+</div>
+<div class="g2">
+  <div class="card"><div class="ct">हाल के बिल</div>
+    <table><thead><tr><th>बिल नं</th><th>कस्टमर</th><th>कुल</th><th>भुगतान</th></tr></thead>
+    <tbody>${[...D.bills].slice(0,6).map(b=>`<tr><td>${billNo(b.id)}</td><td>${b.customer}</td><td>${fmt(b.grand)}</td><td><span class="bdg bb">${b.payment}</span></td></tr>`).join('')||'<tr><td colspan="4" style="text-align:center;padding:1rem;color:var(--t2)">कोई बिल नहीं</td></tr>'}</tbody>
+    </table></div>
+  <div class="card"><div class="ct">कम स्टॉक अलर्ट</div>
+    <table><thead><tr><th>प्रोडक्ट</th><th>स्टॉक</th><th>न्यूनतम</th></tr></thead>
+    <tbody>${low.length?low.map(p=>`<tr><td>${p.name}</td><td><span class="bdg br">${p.stock} ${p.unit}</span></td><td>${p.minStock||5}</td></tr>`).join(''):'<tr><td colspan="3" style="text-align:center;padding:1rem;color:var(--t2)">सब ठीक है ✓</td></tr>'}</tbody>
+    </table></div>
+</div>`;
+}
+
+// ── BILLING ──
+function renderBilling(){
+  const el=document.getElementById('tab-billing');if(!el)return;
+  const s=D.settings||{};
+  const today=new Date().toISOString().split('T')[0];
+  el.innerHTML=`
+<div class="g2"><div>
+  <div class="card"><div class="ct">बिल विवरण</div>
+    <div class="g3">
+      <div class="fg"><label>बिल नंबर</label>
+        <div class="fr" style="gap:4px">
+          <span style="padding:9px 10px;background:var(--bg2);border-radius:8px;border:1px solid var(--bdr);font-weight:700;white-space:nowrap;font-size:13px">${s.billPrefix||'INV'}-</span>
+          <input id="bnum" type="number" value="${s.nextBill||1001}" style="width:80px">
+        </div>
+      </div>
+      <div class="fg"><label>तारीख</label><input type="date" id="bdate" value="${today}"></div>
+      <div class="fg"><label>भुगतान</label>
+        <select id="bpay"><option>नकद</option><option>UPI</option><option>क्रेडिट</option><option>चेक</option></select>
+      </div>
+    </div>
+    <div class="fg"><label>कस्टमर</label>
+      <select id="bcust"><option value="">-- वॉक-इन कस्टमर --</option>
+        ${D.customers.map(c=>`<option value="${c.id}">${c.name}${c.phone?' ('+c.phone+')':''}</option>`).join('')}
+      </select>
+    </div>
+  </div>
+
+  <div class="card"><div class="ct" style="margin-bottom:.5rem">🔢 GST रिवर्स कैलकुलेटर</div>
+    <div class="rbox"><div class="rtitle">टोटल राशि डालें → Taxable amount अपने आप निकलेगी</div>
+      <div class="rrow"><label>टोटल (GST सहित) ₹</label><input type="number" id="rct" placeholder="0" oninput="rcalc()"></div>
+      <div class="rrow"><label>GST दर %</label>
+        <select id="rcg" onchange="rcalc()"><option value="5">5%</option><option value="12">12%</option><option value="18" selected>18%</option><option value="28">28%</option></select>
+      </div>
+      <div class="fr" style="margin-top:.5rem;flex-wrap:wrap;gap:6px">
+        <div class="rout" id="rctax">Taxable: ₹0.00</div>
+        <div class="rout" id="rcgst">GST: ₹0.00</div>
+        <div class="rout" id="rccg">CGST: ₹0.00</div>
+        <div class="rout" id="rcsg">SGST: ₹0.00</div>
+      </div>
+      <button class="btn btp bts" style="margin-top:.625rem" onclick="applyRC()">↓ बिल में भरें</button>
+    </div>
+  </div>
+
+  <div class="card"><div class="ct">आइटम जोड़ें</div>
+    <div class="g3">
+      <div class="fg"><label>प्रोडक्ट</label>
+        <select id="sp" onchange="fillP()"><option value="">-- चुनें --</option>
+          ${D.products.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fg"><label>मात्रा</label><input type="number" id="sq" value="1" min="1"></div>
+      <div class="fg"><label>दर (₹)</label><input type="number" id="sr" placeholder="0.00"></div>
+    </div>
+    <div class="g3">
+      <div class="fg"><label>GST %</label>
+        <select id="sg"><option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18" selected>18%</option><option value="28">28%</option></select>
+      </div>
+      <div class="fg"><label>HSN कोड</label>
+        <input id="sh" placeholder="नाम से खोजें..." oninput="hsnS(this.value,'hsg','sh','sg')">
+      </div>
+      <div class="fg"><label>&nbsp;</label><button class="btn btp" onclick="addItem()">+ जोड़ें</button></div>
+    </div>
+    <div id="hsg" style="display:none;margin-bottom:.625rem"></div>
+    <table><thead><tr><th>प्रोडक्ट</th><th>मात्रा</th><th>दर</th><th>GST</th><th>कुल</th><th></th></tr></thead>
+    <tbody id="bi-body"></tbody></table>
+    <div class="btots" style="margin-top:.75rem">
+      <div class="r"><span>Taxable Amount</span><span id="tsub">₹0.00</span></div>
+      <div class="r"><span>CGST</span><span id="tcg">₹0.00</span></div>
+      <div class="r"><span>SGST</span><span id="tsg">₹0.00</span></div>
+      <div class="g"><span>कुल देय</span><span id="tgr">₹0.00</span></div>
+    </div>
+    <div class="fr" style="margin-top:1rem">
+      <button class="btn btp" onclick="genBill()">✓ बिल बनाएं</button>
+      <button class="btn" onclick="clearBill()">साफ करें</button>
+    </div>
+  </div>
+</div>
+<div id="bpreview"><div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4rem 1rem;color:var(--t3);text-align:center">
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" style="margin-bottom:.875rem;opacity:.3"><rect x="3" y="2" width="18" height="20" rx="2" stroke="currentColor" stroke-width="1.5"/><line x1="7" y1="7" x2="17" y2="7" stroke="currentColor" stroke-width="1.5"/><line x1="7" y1="11" x2="17" y2="11" stroke="currentColor" stroke-width="1.5"/><line x1="7" y1="15" x2="13" y2="15" stroke="currentColor" stroke-width="1.5"/></svg>
+  <p style="font-size:13px">बिल बनने के बाद यहाँ दिखेगा</p>
+</div></div>
+</div>`;
+  renderBillItems();
+}
+
+function rcalc(){const tot=+document.getElementById('rct').value||0,g=+document.getElementById('rcg').value||0,tx=tot/(1+g/100),ga=tot-tx;document.getElementById('rctax').textContent='Taxable: ₹'+tx.toFixed(2);document.getElementById('rcgst').textContent='GST: ₹'+ga.toFixed(2);document.getElementById('rccg').textContent='CGST: ₹'+(ga/2).toFixed(2);document.getElementById('rcsg').textContent='SGST: ₹'+(ga/2).toFixed(2)}
+function applyRC(){const tot=+document.getElementById('rct').value||0;if(!tot){alert('टोटल राशि डालें');return}const g=+document.getElementById('rcg').value||0;document.getElementById('sr').value=(tot/(1+g/100)).toFixed(2);document.getElementById('sg').value=g;document.getElementById('sq').value=1}
+
+function hsnS(v,boxId,inpId,gstId){
+  const box=document.getElementById(boxId);if(!box)return;
+  if(!v||v.length<2){box.style.display='none';return}
+  const res=HSN_DB.filter(h=>h.keys.some(k=>k.includes(v.toLowerCase()))||h.desc.toLowerCase().includes(v.toLowerCase())||h.code.includes(v)).slice(0,6);
+  if(!res.length){box.style.display='none';return}
+  box.style.display='block';
+  box.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:4px;padding:4px 0">'+
+    res.map(h=>`<span class="pill" onclick="selHSN('${h.code}',${h.gst},'${boxId}','${inpId}','${gstId}')">${h.code} – ${h.desc.substring(0,22)} (${h.gst}%)</span>`).join('')+'</div>'
+}
+function selHSN(code,gst,boxId,inpId,gstId){
+  const i=document.getElementById(inpId);if(i)i.value=code;
+  const g=document.getElementById(gstId);if(g)g.value=gst;
+  const b=document.getElementById(boxId);if(b)b.style.display='none';
+}
+
+function fillP(){const id=+document.getElementById('sp').value;if(!id)return;const p=D.products.find(x=>x.id===id);if(p){document.getElementById('sr').value=p.sellPrice;document.getElementById('sg').value=p.gst;document.getElementById('sh').value=p.hsn||''}}
+
+function addItem(){
+  const qty=+document.getElementById('sq').value||1,rate=+document.getElementById('sr').value||0,gst=+document.getElementById('sg').value||0;
+  if(!rate){alert('दर डालें');return}
+  const pId=+document.getElementById('sp').value||null;
+  const name=pId?(D.products.find(p=>p.id===pId)?.name||'आइटम'):'आइटम';
+  const base=qty*rate,gstAmt=base*gst/100;
+  D.billItems.push({pId,name,qty,rate,gst,base,gstAmt,total:base+gstAmt,hsn:document.getElementById('sh').value});
+  document.getElementById('sp').value='';document.getElementById('sq').value=1;document.getElementById('sr').value='';document.getElementById('sh').value='';
+  const hb=document.getElementById('hsg');if(hb)hb.style.display='none';
+  renderBillItems();
+}
+function renderBillItems(){
+  const tb=document.getElementById('bi-body');if(!tb)return;
+  const items=D.billItems||[];
+  if(!items.length)tb.innerHTML='<tr><td colspan="6" style="text-align:center;padding:1rem;color:var(--t2)">कोई आइटम नहीं</td></tr>';
+  else tb.innerHTML=items.map((item,i)=>`<tr><td>${item.name}${item.hsn?'<br><small style="color:var(--t3)">HSN:'+item.hsn+'</small>':''}</td><td>${item.qty}</td><td>${fmt(item.rate)}</td><td>${item.gst}%</td><td>${fmt(item.total)}</td><td><button class="btn bts btd" onclick="rmItem(${i})">✕</button></td></tr>`).join('');
+  const sub=items.reduce((s,i)=>s+i.base,0),gt=items.reduce((s,i)=>s+i.gstAmt,0);
+  const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v};
+  set('tsub',fmt(sub));set('tcg',fmt(gt/2));set('tsg',fmt(gt/2));set('tgr',fmt(sub+gt));
+}
+function rmItem(i){D.billItems.splice(i,1);renderBillItems()}
+function clearBill(){D.billItems=[];renderBillItems();const p=document.getElementById('bpreview');if(p)p.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4rem 1rem;color:var(--t3);text-align:center"><p style="font-size:13px">बिल बनने के बाद यहाँ दिखेगा</p></div>'}
+
+async function genBill(){
+  const items=D.billItems||[];
+  if(!items.length){alert('पहले आइटम जोड़ें');return}
+  const billId=+document.getElementById('bnum').value;
+  const billDate=new Date(document.getElementById('bdate').value).toISOString();
+  const sub=items.reduce((s,i)=>s+i.base,0),gt=items.reduce((s,i)=>s+i.gstAmt,0),grand=sub+gt;
+  const cId=document.getElementById('bcust').value;
+  const cust=cId?D.customers.find(c=>c.id===+cId):null;
+  const payment=document.getElementById('bpay').value;
+  const bill={id:billId,date:billDate,customer:cust?cust.name:'वॉक-इन',custId:cId||null,custGstin:cust?.gstin||'',custAddr:cust?.address||'',items:[...items],subtotal:sub,gstTotal:gt,grand,payment};
+  D.bills.unshift(bill);D.settings.nextBill=billId+1;
+  if(cust)cust.totalPurchase=(cust.totalPurchase||0)+grand;
+  items.filter(i=>i.pId).forEach(({pId,qty})=>{const p=D.products.find(x=>x.id===pId);if(p)p.stock=Math.max(0,+p.stock-qty)});
+  saveLocal();
+  try{
+    await sb.from('bills').upsert({id:billId,shop_id:currentShop.id,date:billDate,customer:bill.customer,cust_id:cust?.id||null,cust_gstin:bill.custGstin,cust_addr:bill.custAddr,items:bill.items,subtotal:sub,gst_total:gt,grand,payment});
+    await sb.from('shops').update({settings:D.settings}).eq('id',currentShop.id);
+    if(cust)await sb.from('customers').update({total_purchase:cust.totalPurchase}).eq('id',cust.id);
+    for(const {pId,qty} of items.filter(i=>i.pId)){const p=D.products.find(x=>x.id===pId);if(p)await sb.from('products').update({stock:p.stock}).eq('id',pId)}
+    toast('बिल save हो गया ✓');
+  }catch(e){toast('Local save — sync बाद में होगा','warn')}
+  D.billItems=[];renderBillItems();showPreview(bill);
+}
+
+function showPreview(bill){
+  const s=D.settings||{};
+  const d=new Date(bill.date),ds=d.toLocaleDateString('hi-IN')+' '+d.toLocaleTimeString('hi-IN',{hour:'2-digit',minute:'2-digit'});
+  const rows=bill.items.map((item,i)=>`<tr><td>${i+1}</td><td>${item.name}${item.hsn?'<br><small style="color:var(--t3)">HSN:'+item.hsn+'</small>':''}</td><td>${item.qty}</td><td>${fmtN(item.rate)}</td><td>${item.gst}%</td><td>${fmtN(item.gstAmt)}</td><td style="font-weight:700">${fmtN(item.total)}</td></tr>`).join('');
+  const bankHtml=s.bankName?`<div style="margin-top:.875rem;padding:.75rem;border:1px solid var(--bdr);border-radius:9px;font-size:11px"><p style="font-weight:700;margin-bottom:4px">💳 भुगतान विवरण</p>${s.bankName?'<p>बैंक: '+s.bankName+'</p>':''}${s.accountNo?'<p>A/C: '+s.accountNo+'</p>':''}${s.ifsc?'<p>IFSC: '+s.ifsc+'</p>':''}${s.upiId?'<p>UPI: <b>'+s.upiId+'</b></p>':''}</div>`:'';
+  const wa=`बिल नं: ${billNo(bill.id)}%0Aतारीख: ${ds}%0Aदुकान: ${s.shopName||''}%0AGSTIN: ${s.gstin||'N/A'}%0A%0A${bill.items.map(i=>`${i.name} x${i.qty} = ₹${fmtN(i.total)}`).join('%0A')}%0A%0ATaxable: ₹${fmtN(bill.subtotal)}%0ACGST: ₹${fmtN(bill.gstTotal/2)}%0ASGST: ₹${fmtN(bill.gstTotal/2)}%0Aकुल देय: ₹${fmtN(bill.grand)}%0Aभुगतान: ${bill.payment}${s.upiId?'%0AUPI: '+s.upiId:''}%0A%0Aधन्यवाद!`;
+  const bp=document.getElementById('bpreview');if(!bp)return;
+  bp.innerHTML=`<div class="bprev">
+  <div class="bph"><h2>${s.shopName||'दुकान'}</h2><p>${s.address||''}</p>
+    <p>GSTIN: ${s.gstin||'N/A'}${s.phone?' | मो: '+s.phone:''}</p>
+    <p style="font-weight:700;margin-top:6px;letter-spacing:.5px;font-size:13px">TAX INVOICE</p>
+  </div>
+  <div class="bmeta">
+    <div><b>बिल नं:</b> ${billNo(bill.id)}<br><b>तारीख:</b> ${ds}</div>
+    <div style="text-align:right"><b>कस्टमर:</b> ${bill.customer}${bill.custGstin?'<br><small>GSTIN: '+bill.custGstin+'</small>':''}${bill.custAddr?'<br><small>'+bill.custAddr+'</small>':''}<br><b>भुगतान:</b> ${bill.payment}</div>
+  </div>
+  <table><thead><tr><th>#</th><th>विवरण</th><th>मात्रा</th><th>दर</th><th>GST%</th><th>GST₹</th><th>कुल</th></tr></thead>
+  <tbody>${rows}</tbody></table>
+  <div class="btots" style="margin-top:.875rem">
+    <div class="r"><span>Taxable Amount</span><span>₹${fmtN(bill.subtotal)}</span></div>
+    <div class="r"><span>CGST</span><span>₹${fmtN(bill.gstTotal/2)}</span></div>
+    <div class="r"><span>SGST</span><span>₹${fmtN(bill.gstTotal/2)}</span></div>
+    <div class="g"><span>कुल देय</span><span>₹${fmtN(bill.grand)}</span></div>
+  </div>
+  ${bankHtml}
+  <p style="text-align:center;margin-top:.875rem;font-size:11px;color:var(--t2)">धन्यवाद! फिर पधारें।</p>
+</div>
+<div class="fr no-print" style="margin-top:.875rem;justify-content:center">
+  <button class="btn btp bts" onclick="window.print()">🖨️ प्रिंट</button>
+  <a href="https://wa.me/?text=${wa}" target="_blank" style="text-decoration:none">
+    <button class="btn btg bts">📲 WhatsApp</button>
+  </a>
+  <button class="btn bto bts" onclick="expBill(${bill.id})">📊 Excel</button>
+</div>`;
+}
+
+// ── INVENTORY ──
+function renderInv(){
+  const el=document.getElementById('tab-inventory');if(!el)return;
+  el.innerHTML=`<div class="card"><div class="ct">प्रोडक्ट जोड़ें</div>
+  <div class="g3">
+    <div class="fg"><label>नाम *</label><input id="pn" placeholder="प्रोडक्ट नाम"></div>
+    <div class="fg"><label>बारकोड / SKU</label><input id="pbar" placeholder="स्कैन या डालें"></div>
+    <div class="fg"><label>HSN कोड</label><input id="ph" placeholder="नाम से खोजें..." oninput="hsnS(this.value,'hinv','ph','pg')"></div>
+  </div>
+  <div id="hinv" style="display:none;margin-bottom:.5rem"></div>
+  <div class="g3">
+    <div class="fg"><label>GST %</label><select id="pg"><option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18" selected>18%</option><option value="28">28%</option></select></div>
+    <div class="fg"><label>खरीद मूल्य ₹</label><input id="pb" type="number" placeholder="0.00"></div>
+    <div class="fg"><label>बिक्री मूल्य ₹</label><input id="ps" type="number" placeholder="0.00"></div>
+  </div>
+  <div class="g3" style="margin-bottom:.875rem">
+    <div class="fg"><label>स्टॉक मात्रा</label><input id="pst" type="number" placeholder="0"></div>
+    <div class="fg"><label>न्यूनतम स्टॉक</label><input id="pm" type="number" placeholder="5"></div>
+    <div class="fg"><label>यूनिट</label><select id="pu"><option>Pcs</option><option>Kg</option><option>Ltr</option><option>Box</option><option>Pack</option></select></div>
+  </div>
+  <button class="btn btp" onclick="addProd()">+ प्रोडक्ट जोड़ें</button></div>
+  <div class="card">
+    <div class="fr" style="justify-content:space-between;margin-bottom:.875rem">
+      <div class="ct" style="margin:0">इनवेंटरी (${D.products.length} प्रोडक्ट)</div>
+      <div class="fr"><input placeholder="खोजें..." id="inv-s" oninput="filterInv(this.value)" style="width:160px">
+      <button class="btn bto bts" onclick="expInv()">📊 Excel</button></div>
+    </div>
+    <div style="overflow-x:auto">
+    <table><thead><tr><th>नाम</th><th>बारकोड</th><th>HSN</th><th>GST</th><th>खरीद</th><th>बिक्री</th><th>स्टॉक</th><th>स्थिति</th><th></th></tr></thead>
+    <tbody id="inv-tb">${invRows()}</tbody></table></div></div>`;
+}
+function invRows(f=''){
+  const list=D.products.filter(p=>p.name.toLowerCase().includes(f.toLowerCase()));
+  if(!list.length)return'<tr><td colspan="9" style="text-align:center;padding:1.25rem;color:var(--t2)">कोई प्रोडक्ट नहीं — ऊपर से जोड़ें</td></tr>';
+  return list.map(p=>{const low=+p.stock<=+(p.minStock||5);return`<tr><td><b>${p.name}</b></td><td style="font-size:11px;color:var(--t2)">${p.barcode||'-'}</td><td>${p.hsn||'-'}</td><td>${p.gst}%</td><td>${fmt(p.buyPrice)}</td><td>${fmt(p.sellPrice)}</td><td>${p.stock} ${p.unit}</td><td>${low?'<span class="bdg br">कम</span>':'<span class="bdg bg">ठीक</span>'}</td><td><button class="btn bts btd" onclick="delProd(${p.id})">✕</button></td></tr>`}).join('')
+}
+function filterInv(v){const t=document.getElementById('inv-tb');if(t)t.innerHTML=invRows(v)}
+async function addProd(){
+  const n=document.getElementById('pn').value.trim();if(!n){alert('नाम जरूरी है');return}
+  const p={id:Date.now(),name:n,barcode:document.getElementById('pbar').value,hsn:document.getElementById('ph').value,gst:document.getElementById('pg').value,buyPrice:document.getElementById('pb').value||0,sellPrice:document.getElementById('ps').value||0,stock:+document.getElementById('pst').value||0,minStock:+document.getElementById('pm').value||5,unit:document.getElementById('pu').value};
+  D.products.push(p);saveLocal();
+  try{await sb.from('products').upsert({id:p.id,shop_id:currentShop.id,name:p.name,barcode:p.barcode,hsn:p.hsn,gst:p.gst,buy_price:p.buyPrice,sell_price:p.sellPrice,stock:p.stock,min_stock:p.minStock,unit:p.unit});toast('प्रोडक्ट save ✓')}
+  catch(e){toast('Local save','warn')}
+  renderInv();
+}
+async function delProd(id){if(!confirm('यह प्रोडक्ट मिटाएं?'))return;D.products=D.products.filter(p=>p.id!==id);saveLocal();try{await sb.from('products').delete().eq('id',id)}catch(e){}renderInv()}
+
+// ── CUSTOMERS ──
+function renderCust(){
+  const el=document.getElementById('tab-customers');if(!el)return;
+  el.innerHTML=`<div class="card"><div class="ct">कस्टमर जोड़ें</div>
+  <div class="g3">
+    <div class="fg"><label>नाम *</label><input id="cn" placeholder="पूरा नाम"></div>
+    <div class="fg"><label>मोबाइल</label><input id="cp" placeholder="10 अंक"></div>
+    <div class="fg"><label>GSTIN</label><input id="cg" placeholder="15 अंक"></div>
+  </div>
+  <div class="fg" style="margin-bottom:.875rem"><label>पता</label><input id="ca" placeholder="पूरा पता"></div>
+  <button class="btn btp" onclick="addCust()">+ कस्टमर जोड़ें</button></div>
+  <div class="card"><div class="ct">कस्टमर (${D.customers.length})</div>
+  <table><thead><tr><th>नाम</th><th>मोबाइल</th><th>GSTIN</th><th>कुल खरीद</th><th></th></tr></thead>
+  <tbody>${D.customers.length?D.customers.map(c=>`<tr><td><b>${c.name}</b></td><td>${c.phone||'-'}</td><td>${c.gstin||'-'}</td><td>${fmt(c.totalPurchase||0)}</td><td><button class="btn bts btd" onclick="delCust(${c.id})">✕</button></td></tr>`).join(''):'<tr><td colspan="5" style="text-align:center;padding:1.25rem;color:var(--t2)">कोई कस्टमर नहीं</td></tr>'}</tbody>
+  </table></div>`;
+}
+async function addCust(){
+  const n=document.getElementById('cn').value.trim();if(!n){alert('नाम जरूरी है');return}
+  const c={id:Date.now(),name:n,phone:document.getElementById('cp').value,gstin:document.getElementById('cg').value,address:document.getElementById('ca').value,totalPurchase:0};
+  D.customers.push(c);saveLocal();
+  try{await sb.from('customers').upsert({id:c.id,shop_id:currentShop.id,name:c.name,phone:c.phone,gstin:c.gstin,address:c.address,total_purchase:0});toast('कस्टमर save ✓')}
+  catch(e){toast('Local save','warn')}
+  renderCust();
+}
+async function delCust(id){if(!confirm('कस्टमर मिटाएं?'))return;D.customers=D.customers.filter(c=>c.id!==id);saveLocal();try{await sb.from('customers').delete().eq('id',id)}catch(e){}renderCust()}
+
+// ── BILLS ──
+function renderBillsTab(){
+  const el=document.getElementById('tab-bills');if(!el)return;
+  el.innerHTML=`<div class="card">
+  <div class="fr" style="justify-content:space-between;margin-bottom:.875rem">
+    <div class="ct" style="margin:0">बिल इतिहास (${D.bills.length})</div>
+    <button class="btn bto bts" onclick="expBills()">📊 Excel</button>
+  </div>
+  <div style="overflow-x:auto">
+  <table><thead><tr><th>बिल नं</th><th>तारीख</th><th>कस्टमर</th><th>Taxable</th><th>GST</th><th>कुल</th><th>भुगतान</th><th></th></tr></thead>
+  <tbody>${D.bills.length?D.bills.map(b=>`<tr><td><b>${billNo(b.id)}</b></td><td>${new Date(b.date).toLocaleDateString('hi-IN')}</td><td>${b.customer}</td><td>${fmt(b.subtotal)}</td><td>${fmt(b.gstTotal)}</td><td><b>${fmt(b.grand)}</b></td><td><span class="bdg bb">${b.payment}</span></td><td><button class="btn bts" onclick="viewBill(${b.id})">देखें</button></td></tr>`).join(''):'<tr><td colspan="8" style="text-align:center;padding:1.25rem;color:var(--t2)">कोई बिल नहीं</td></tr>'}</tbody>
+  </table></div></div>`;
+}
+function viewBill(id){const b=D.bills.find(x=>x.id===id);if(!b)return;sw('billing');setTimeout(()=>showPreview(b),80)}
+
+// ── REPORTS ──
+function renderReports(){
+  const el=document.getElementById('tab-reports');if(!el)return;
+  const months=[...new Set(D.bills.map(b=>{const d=new Date(b.date);return d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0')}))].sort().reverse();
+  const sel=months[0]||'';
+  const gstT=D.bills.reduce((s,b)=>s+b.gstTotal,0);
+  el.innerHTML=`<div class="g4" style="margin-bottom:1.25rem">
+  <div class="sc"><div class="lbl">कुल बिक्री</div><div class="val">${fmt(D.bills.reduce((s,b)=>s+b.grand,0))}</div></div>
+  <div class="sc"><div class="lbl">कुल GST</div><div class="val">${fmt(gstT)}</div></div>
+  <div class="sc"><div class="lbl">CGST</div><div class="val">${fmt(gstT/2)}</div></div>
+  <div class="sc"><div class="lbl">SGST</div><div class="val">${fmt(gstT/2)}</div></div>
+</div>
+<div class="card">
+  <div class="fr" style="justify-content:space-between;margin-bottom:.875rem">
+    <div class="ct" style="margin:0">GSTR-1 रिपोर्ट</div>
+    <div class="fr">
+      <select id="rep-m" onchange="filterRep(this.value)" style="font-size:12px;padding:5px 8px">
+        ${months.map(m=>`<option value="${m}">${m}</option>`).join('')}
+      </select>
+      <button class="btn bto bts" onclick="expGST()">📊 Excel</button>
+    </div>
+  </div>
+  <div id="rep-rows">${repRows(sel)}</div>
+</div>`;
+}
+function repRows(sel){
+  const fl=D.bills.filter(b=>{const d=new Date(b.date);return(d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0'))===sel});
+  if(!fl.length)return'<p style="text-align:center;padding:1.25rem;color:var(--t2);font-size:13px">इस महीने कोई बिल नहीं</p>';
+  return`<div style="overflow-x:auto"><table><thead><tr><th>Invoice No</th><th>Date</th><th>Customer</th><th>GSTIN</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>Total GST</th><th>Invoice Total</th></tr></thead>
+  <tbody>${fl.map(b=>`<tr><td>${billNo(b.id)}</td><td>${new Date(b.date).toLocaleDateString('en-IN')}</td><td>${b.customer}</td><td>${b.custGstin||'-'}</td><td>${fmt(b.subtotal)}</td><td>${fmt(b.gstTotal/2)}</td><td>${fmt(b.gstTotal/2)}</td><td>${fmt(b.gstTotal)}</td><td><b>${fmt(b.grand)}</b></td></tr>`).join('')}
+  </tbody></table></div>`
+}
+function filterRep(v){const e=document.getElementById('rep-rows');if(e)e.innerHTML=repRows(v)}
+
+// ── SETTINGS ──
+function renderSettings(){
+  const el=document.getElementById('tab-settings');if(!el)return;
+  const s=D.settings||{};
+  el.innerHTML=`<div class="card"><div class="ct">दुकान की जानकारी</div>
+  <div class="g2">
+    <div class="fg"><label>दुकान का नाम</label><input id="ss" value="${s.shopName||''}"></div>
+    <div class="fg"><label>GSTIN</label><input id="sgs" value="${s.gstin||''}"></div>
+  </div>
+  <div class="g2">
+    <div class="fg"><label>मोबाइल नंबर</label><input id="sph" value="${s.phone||''}" placeholder="मोबाइल नंबर"></div>
+    <div class="fg"><label>राज्य</label>
+      <select id="sst">${['Bihar','UP','Delhi','Maharashtra','West Bengal','Rajasthan','MP','Gujarat','Tamil Nadu','Karnataka','Punjab','Haryana'].map(x=>`<option${s.state===x?' selected':''}>${x}</option>`).join('')}</select>
+    </div>
+  </div>
+  <div class="fg" style="margin-bottom:.875rem"><label>दुकान का पूरा पता</label>
+    <input id="sad" value="${s.address||''}" placeholder="पूरा पता जो बिल पर दिखे">
+  </div>
+  <div class="hr"></div>
+  <div class="ct" style="margin-bottom:.625rem">बिल नंबर सेटिंग</div>
+  <div class="g3" style="margin-bottom:.875rem">
+    <div class="fg"><label>Prefix (उपसर्ग)</label><input id="spfx" value="${s.billPrefix||'INV'}" placeholder="INV, BILL, SR..."></div>
+    <div class="fg"><label>अगला बिल नंबर</label><input id="snxt" type="number" value="${s.nextBill||1001}"></div>
+    <div class="fg"><label>बिल format दिखेगा</label>
+      <div style="padding:9px 12px;background:var(--bg2);border-radius:9px;font-size:14px;font-weight:700;color:var(--acc)">${s.billPrefix||'INV'}-${s.nextBill||1001}</div>
+    </div>
+  </div>
+  <div class="hr"></div>
+  <div class="ct" style="margin-bottom:.625rem">बैंक विवरण (बिल पर दिखेगा)</div>
+  <div class="g2">
+    <div class="fg"><label>बैंक का नाम</label><input id="sbn" value="${s.bankName||''}" placeholder="SBI, HDFC, PNB..."></div>
+    <div class="fg"><label>खाता नंबर</label><input id="sac" value="${s.accountNo||''}" placeholder="A/C नंबर"></div>
+  </div>
+  <div class="g2" style="margin-bottom:.875rem">
+    <div class="fg"><label>IFSC कोड</label><input id="sif" value="${s.ifsc||''}" placeholder="SBIN0001234"></div>
+    <div class="fg"><label>UPI ID</label><input id="supi" value="${s.upiId||''}" placeholder="name@upi या 9876543210@paytm"></div>
+  </div>
+  <button class="btn btp" onclick="saveSett()">💾 Settings Save करें</button></div>
+
+  <div class="card"><div class="ct">Account</div>
+  <p style="font-size:13px;color:var(--t2);margin-bottom:.75rem">
+    Login: <b style="color:var(--t1)">${currentUser?.email||''}</b>
+  </p>
+  <div class="fr">
+    <button class="btn bto bts" onclick="syncAll()">↻ Force Sync</button>
+    <button class="btn btd bts" onclick="if(confirm('Logout करें?'))doLogout()">↩ Logout</button>
+  </div></div>`;
+}
+
+async function saveSett(){
+  Object.assign(D.settings,{
+    shopName:document.getElementById('ss').value,gstin:document.getElementById('sgs').value,
+    phone:document.getElementById('sph').value,state:document.getElementById('sst').value,
+    address:document.getElementById('sad').value,billPrefix:document.getElementById('spfx').value||'INV',
+    nextBill:+document.getElementById('snxt').value||1001,bankName:document.getElementById('sbn').value,
+    accountNo:document.getElementById('sac').value,ifsc:document.getElementById('sif').value,
+    upiId:document.getElementById('supi').value
+  });
+  saveLocal();
+  try{
+    await sb.from('shops').update({name:D.settings.shopName,gstin:D.settings.gstin,settings:D.settings}).eq('id',currentShop.id);
+    toast('Settings save हो गई ✓');
+  }catch(e){toast('Local save','warn')}
+  renderApp();
+}
+
+// ── EXCEL ──
+const csv=(h,r)=>[h,...r].map(row=>row.map(c=>`"${(c||'').toString().replace(/"/g,'""')}"`).join(',')).join('\r\n');
+const dlCSV=(data,name)=>{const b=new Blob(['\uFEFF'+data],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();document.body.removeChild(a)};
+function expInv(){dlCSV(csv(['नाम','बारकोड','HSN','GST%','खरीद','बिक्री','स्टॉक','यूनिट','न्यूनतम'],D.products.map(p=>[p.name,p.barcode||'',p.hsn||'',p.gst,p.buyPrice,p.sellPrice,p.stock,p.unit,p.minStock||5])),'inventory_'+new Date().toLocaleDateString('en-IN').replace(/\//g,'-')+'.csv')}
+function expBills(){dlCSV(csv(['बिल नं','तारीख','कस्टमर','GSTIN','Taxable','CGST','SGST','Total GST','कुल','भुगतान'],D.bills.map(b=>[billNo(b.id),new Date(b.date).toLocaleDateString('en-IN'),b.customer,b.custGstin||'',fmtN(b.subtotal),fmtN(b.gstTotal/2),fmtN(b.gstTotal/2),fmtN(b.gstTotal),fmtN(b.grand),b.payment])),'bills_'+new Date().toLocaleDateString('en-IN').replace(/\//g,'-')+'.csv')}
+function expGST(){const sel=document.getElementById('rep-m')?.value;const fl=sel?D.bills.filter(b=>{const d=new Date(b.date);return(d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0'))===sel}):D.bills;dlCSV(csv(['Invoice No','Invoice Date','Customer Name','Customer GSTIN','Taxable Value','CGST Amount','SGST Amount','Total GST','Invoice Total'],fl.map(b=>[billNo(b.id),new Date(b.date).toLocaleDateString('en-IN'),b.customer,b.custGstin||'',fmtN(b.subtotal),fmtN(b.gstTotal/2),fmtN(b.gstTotal/2),fmtN(b.gstTotal),fmtN(b.grand)])),'GSTR1_'+( sel||'all')+'.csv')}
+function expBill(id){const b=D.bills.find(x=>x.id===id);if(!b)return;dlCSV(csv(['#','Product','HSN','Qty','Rate','GST%','GST Amount','Total'],(b.items||[]).map((item,i)=>[i+1,item.name,item.hsn||'',item.qty,fmtN(item.rate),item.gst+'%',fmtN(item.gstAmt),fmtN(item.total)])),'Bill_'+billNo(id)+'.csv')}
+
+// ── LISTEN AUTH CHANGES (Google OAuth redirect के बाद) ──
+sb.auth.onAuthStateChange(async(event,session)=>{
+  if((event==='SIGNED_IN'||event==='TOKEN_REFRESHED')&&session&&!currentUser){
+    currentUser=session.user;
+    await loadShopForUser();
+  }
+  if(event==='SIGNED_OUT'){currentUser=null;renderAuth('login')}
+});
+
+renderRoot();
+</script>
+</body>
+</html>
