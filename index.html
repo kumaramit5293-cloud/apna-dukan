@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="अपना दुकान">
-<link rel="manifest" id="pwa-manifest">
+<link rel="manifest" href="/apna-dukan/manifest.json">
 <title>अपना दुकान — GST बिलिंग ऐप</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -309,24 +309,7 @@ const SB_URL = 'https://ouusbkidjfxnyoertlhz.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im91dXNia2lkamZ4bnlvZXJ0bGh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NzcwMDMsImV4cCI6MjA4OTM1MzAwM30.qk0t2dSFCxh_0emTaVPPUKFbFII0wpIKwB7MRR_Wa8Y';
 // ============================================================
 
-// ── PWA MANIFEST (inline) — GitHub Pages subfolder fixed ──
-const APP_SCOPE='/apna-dukan/';
-const MANIFEST={
-  name:'अपना दुकान',short_name:'दुकान',
-  description:'GST बिलिंग ऐप — Windows & Android',
-  start_url:'/apna-dukan/',
-  scope:'/apna-dukan/',
-  display:'standalone',
-  background_color:'#f3f4f6',
-  theme_color:'#1a56db',
-  orientation:'portrait-primary',
-  icons:[
-    {src:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="80" fill="%231a56db"/><text y="340" x="256" text-anchor="middle" font-size="260" font-family="sans-serif">🏪</text></svg>',sizes:'192x192',type:'image/svg+xml'},
-    {src:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="80" fill="%231a56db"/><text y="340" x="256" text-anchor="middle" font-size="260" font-family="sans-serif">🏪</text></svg>',sizes:'512x512',type:'image/svg+xml',purpose:'any maskable'}
-  ]
-};
-const mBlob=new Blob([JSON.stringify(MANIFEST)],{type:'application/json'});
-document.getElementById('pwa-manifest').href=URL.createObjectURL(mBlob);
+// ── PWA MANIFEST — manifest.json file se load hota hai ──
 
 // ── SERVICE WORKER — sw.js (GitHub Pages) ──
 if('serviceWorker' in navigator){
