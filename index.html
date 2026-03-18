@@ -281,10 +281,17 @@ tr:hover td{background:var(--bg2)}
 /* ── TOTAL INPUT HIGHLIGHT ── */
 input.total-inp{background:var(--accl);border-color:var(--acc);font-weight:600}
 input.total-inp:focus{background:var(--accl)}
-@media print{.sidebar,.topbar,.no-print{display:none!important}.bprev{border:none;padding:0}.sig-area{margin-top:1rem}}
+@media print{
+  body > *{display:none!important}
+  #bill-print-area{display:block!important;position:fixed;top:0;left:0;width:100%;z-index:99999}
+  #bill-print-area .no-print{display:none!important}
+  #bill-print-area .bprev{border:none;padding:0;box-shadow:none;max-width:100%}
+}
+#bill-print-area{display:none}
 </style>
 </head>
 <body>
+<div id="bill-print-area"></div>
 <div id="offline-banner">📵 Internet नहीं है — Offline mode में काम हो रहा है</div>
 <div id="root"></div>
 <div id="toast"></div>
@@ -392,16 +399,42 @@ function setAlert(id,msg,type='err'){const el=document.getElementById(id);if(el)
 async function renderRoot(){
   document.getElementById('root').innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh"><div class="loader"></div></div>';
   try{
-    // 8 second timeout — अगर Supabase respond न करे
+    // 10 second timeout
     const sessionPromise=sb.auth.getSession();
-    const timeoutPromise=new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),8000));
-    const {data:{session},error}=await Promise.race([sessionPromise,timeoutPromise]);
-    if(error||!session){renderAuth('login');return;}
+    const timeoutPromise=new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),10000));
+    const result=await Promise.race([sessionPromise,timeoutPromise]);
+    const session=result?.data?.session;
+    if(!session){
+      // Try once more from local storage before giving up
+      const cached=localStorage.getItem('sb-session');
+      if(cached){
+        try{
+          const parsed=JSON.parse(cached);
+          if(parsed?.access_token&&parsed?.user){
+            currentUser=parsed.user;
+            _authHandled=true;
+            await loadShopForUser();
+            return;
+          }
+        }catch(e2){}
+      }
+      renderAuth('login');return;
+    }
     _authHandled=true;
     currentUser=session.user;
+    // Cache session locally
+    localStorage.setItem('sb-session',JSON.stringify(session));
     await loadShopForUser();
   }catch(e){
     console.log('renderRoot error:',e.message);
+    // Network error — try cached session
+    const cached=localStorage.getItem('sb-session');
+    if(cached){
+      try{
+        const parsed=JSON.parse(cached);
+        if(parsed?.user){currentUser=parsed.user;_authHandled=true;await loadShopForUser();return;}
+      }catch(e2){}
+    }
     renderAuth('login');
   }
 }
@@ -507,6 +540,7 @@ async function doLogin(){
   const {data,error}=await sb.auth.signInWithPassword({email,password:pass});
   if(error){setAlert('auth-alert',error.message==='Invalid login credentials'?'Email या Password गलत है':error.message);btn.disabled=false;btn.textContent='Login करें →';return;}
   currentUser=data.user;
+  localStorage.setItem('sb-session',JSON.stringify(data.session));
   await loadShopForUser();
 }
 
@@ -557,6 +591,7 @@ async function doForgot(){
 async function doLogout(){
   await sb.auth.signOut();
   currentUser=null;currentShop=null;_authHandled=false;
+  localStorage.removeItem('sb-session');
   D={products:[],customers:[],bills:[],billItems:[],settings:{}};
   renderAuth('login');
 }
@@ -897,11 +932,20 @@ function addItem(){
   // Auto-add to inventory if new product
   let pId=null;
   const existing=D.products.find(p=>p.name.toLowerCase()===nameText.toLowerCase());
-  if(existing){pId=existing.id}
+  if(existing){
+    pId=existing.id;
+    // अगर rate बदला है तो inventory में update करें
+    if(existing.sellPrice!==parseFloat(rate.toFixed(2))){
+      existing.sellPrice=parseFloat(rate.toFixed(2));
+      sb.from('products').update({sell_price:existing.sellPrice}).eq('id',existing.id).catch(()=>{});
+    }
+  }
   else{
-    const np={id:Date.now(),name:nameText,barcode:'',hsn:document.getElementById('sh')?.value||'',gst,buyPrice:0,sellPrice:rate,stock:0,minStock:0,unit:'Pcs'};
+    const np={id:Date.now(),name:nameText,barcode:'',hsn:document.getElementById('sh')?.value||'',gst,buyPrice:0,sellPrice:parseFloat(rate.toFixed(2)),stock:0,minStock:0,unit:'Pcs'};
     D.products.push(np);pId=np.id;
-    sb.from('products').upsert({id:np.id,shop_id:currentShop.id,name:np.name,barcode:'',hsn:np.hsn,gst:np.gst,buy_price:0,sell_price:rate,stock:0,min_stock:0,unit:'Pcs'}).catch(()=>{});
+    D._autoAddedPIds=D._autoAddedPIds||new Set();
+    D._autoAddedPIds.add(np.id);
+    sb.from('products').upsert({id:np.id,shop_id:currentShop.id,name:np.name,barcode:'',hsn:np.hsn,gst:np.gst,buy_price:0,sell_price:np.sellPrice,stock:0,min_stock:0,unit:'Pcs'}).catch(()=>{});
   }
   const base=qty*rate,gstAmt=base*gst/100;
   D.billItems.push({pId,name:nameText,qty,rate,gst,base,gstAmt,total:base+gstAmt,hsn:document.getElementById('sh')?.value||''});
@@ -982,7 +1026,19 @@ function selHSN(code,gst,boxId,inpId,gstId){
 }
 function clearBill(){D.billItems=[];renderBillItems();}
 
-function rmItem(i){D.billItems.splice(i,1);renderBillItems()}
+function rmItem(i){
+  const item=D.billItems[i];
+  // अगर यह item इसी session में auto-add हुई है और कोई और बिल में नहीं है
+  if(item?.pId&&D._autoAddedPIds?.has(item.pId)){
+    const usedElsewhere=D.bills.some(b=>b.items?.some(x=>x.pId===item.pId));
+    if(!usedElsewhere){
+      D.products=D.products.filter(p=>p.id!==item.pId);
+      D._autoAddedPIds.delete(item.pId);
+      sb.from('products').delete().eq('id',item.pId).catch(()=>{});
+    }
+  }
+  D.billItems.splice(i,1);renderBillItems();
+}
 
 async function genBill(){
   const items=D.billItems||[];
@@ -1011,44 +1067,125 @@ async function genBill(){
 
 function showPreview(bill){
   const s=D.settings||{};
-  const d=new Date(bill.date),ds=d.toLocaleDateString('hi-IN')+' '+d.toLocaleTimeString('hi-IN',{hour:'2-digit',minute:'2-digit'});
-  const rows=bill.items.map((item,i)=>`<tr><td>${i+1}</td><td>${item.name}${item.hsn?'<br><small style="color:var(--t3)">HSN:'+item.hsn+'</small>':''}</td><td>${item.qty}</td><td>${fmtN(item.rate)}</td><td>${item.gst}%</td><td>${fmtN(item.gstAmt)}</td><td style="font-weight:700">${fmtN(item.total)}</td></tr>`).join('');
-  const bankHtml=s.bankName?`<div style="margin-top:.875rem;padding:.75rem;border:1px solid var(--bdr);border-radius:9px;font-size:11px"><p style="font-weight:700;margin-bottom:4px">💳 भुगतान विवरण</p>${s.bankName?'<p>बैंक: '+s.bankName+'</p>':''}${s.accountNo?'<p>A/C: '+s.accountNo+'</p>':''}${s.ifsc?'<p>IFSC: '+s.ifsc+'</p>':''}${s.upiId?'<p>UPI: <b>'+s.upiId+'</b></p>':''}</div>`:'';
-  const wa=`बिल नं: ${billNo(bill.id)}%0Aतारीख: ${ds}%0Aदुकान: ${s.shopName||''}%0AGSTIN: ${s.gstin||'N/A'}%0A%0A${bill.items.map(i=>`${i.name} x${i.qty} = ₹${fmtN(i.total)}`).join('%0A')}%0A%0ATaxable: ₹${fmtN(bill.subtotal)}%0ACGST: ₹${fmtN(bill.gstTotal/2)}%0ASGST: ₹${fmtN(bill.gstTotal/2)}%0Aकुल देय: ₹${fmtN(bill.grand)}%0Aभुगतान: ${bill.payment}${s.upiId?'%0AUPI: '+s.upiId:''}%0A%0Aधन्यवाद!`;
-  const bp=document.getElementById('bpreview');if(!bp)return;
-  bp.innerHTML=`<div class="bprev">
-  <div class="bph"><h2>${s.shopName||'दुकान'}</h2><p>${s.address||''}</p>
-    <p>GSTIN: ${s.gstin||'N/A'}${s.phone?' | मो: '+s.phone:''}</p>
+  const d=new Date(bill.date);
+  const ds=d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
+  const roundOff=Math.round(bill.grand)-bill.grand;
+  const totalPayable=Math.round(bill.grand);
+  const rows=bill.items.map((item,i)=>`<tr><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">${i+1}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">${item.name}${item.hsn?'<br><small style="color:#6b7280;font-size:10px">HSN: '+item.hsn+'</small>':''}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:center">${item.qty}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${fmtN(item.rate)}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:center">${item.gst}%</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${fmtN(item.gstAmt)}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:700">${fmtN(item.total)}</td></tr>`).join('');
+  const bankHtml=(s.bankName||s.accountNo||s.upiId)?`<div style="margin-top:.875rem;padding:.75rem;border:1px solid #e5e7eb;border-radius:9px;font-size:11px"><p style="font-weight:700;margin-bottom:6px">💳 Payment Details</p><table style="font-size:11px;width:100%;border-collapse:collapse">${s.accountHolder?'<tr><td style="padding:2px 0;color:#6b7280">A/C Holder</td><td style="padding:2px 8px">:</td><td style="font-weight:600">'+s.accountHolder+'</td></tr>':''}${s.bankName?'<tr><td style="padding:2px 0;color:#6b7280">Bank</td><td style="padding:2px 8px">:</td><td>'+s.bankName+'</td></tr>':''}${s.accountNo?'<tr><td style="padding:2px 0;color:#6b7280">A/C No</td><td style="padding:2px 8px">:</td><td>'+s.accountNo+'</td></tr>':''}${s.ifsc?'<tr><td style="padding:2px 0;color:#6b7280">IFSC</td><td style="padding:2px 8px">:</td><td>'+s.ifsc+'</td></tr>':''}${s.upiId?'<tr><td style="padding:2px 0;color:#6b7280">UPI</td><td style="padding:2px 8px">:</td><td style="font-weight:700">'+s.upiId+'</td></tr>':''}</table></div>`:'';
+
+  const billHtml=`<div class="bprev" id="bill-content-inner">
+  <div class="bph">
+    <h2>${s.shopName||'Shop'}</h2>
+    <p>${s.address||''}</p>
+    <p>GSTIN: ${s.gstin||'N/A'}${s.phone?' | Ph: '+s.phone:''}</p>
     <p style="font-weight:700;margin-top:6px;letter-spacing:.5px;font-size:13px">TAX INVOICE</p>
   </div>
   <div class="bmeta">
-    <div><b>बिल नं:</b> ${billNo(bill.id)}<br><b>तारीख:</b> ${ds}</div>
-    <div style="text-align:right"><b>कस्टमर:</b> ${bill.customer}${bill.custGstin?'<br><small>GSTIN: '+bill.custGstin+'</small>':''}${bill.custAddr?'<br><small>'+bill.custAddr+'</small>':''}<br><b>भुगतान:</b> ${bill.payment}</div>
+    <div><b>Invoice No:</b> ${billNo(bill.id)}<br><b>Date:</b> ${ds}</div>
+    <div style="text-align:right"><b>Bill To:</b> ${bill.customer}${bill.custGstin?'<br><small>GSTIN: '+bill.custGstin+'</small>':''}${bill.custAddr?'<br><small>'+bill.custAddr+'</small>':''}<br><b>Payment:</b> ${bill.payment}</div>
   </div>
-  <table><thead><tr><th>#</th><th>विवरण</th><th>मात्रा</th><th>दर</th><th>GST%</th><th>GST₹</th><th>कुल</th></tr></thead>
-  <tbody>${rows}</tbody></table>
-  <div class="btots" style="margin-top:.875rem">
-    <div class="r"><span>Taxable Amount</span><span>₹${fmtN(bill.subtotal)}</span></div>
-    <div class="r"><span>CGST</span><span>₹${fmtN(bill.gstTotal/2)}</span></div>
-    <div class="r"><span>SGST</span><span>₹${fmtN(bill.gstTotal/2)}</span></div>
-    <div class="g"><span>कुल देय</span><span>₹${fmtN(bill.grand)}</span></div>
+  <table style="width:100%;font-size:12px;border-collapse:collapse">
+    <thead><tr style="background:#f3f4f6"><th style="padding:6px 8px;text-align:left">#</th><th style="padding:6px 8px;text-align:left">Description</th><th style="padding:6px 8px;text-align:center">Qty</th><th style="padding:6px 8px;text-align:right">Rate</th><th style="padding:6px 8px;text-align:center">GST%</th><th style="padding:6px 8px;text-align:right">GST Amt</th><th style="padding:6px 8px;text-align:right">Amount</th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td colspan="6" style="padding:6px 8px;text-align:right;font-weight:600;border-top:2px solid #111">Total</td><td style="padding:6px 8px;text-align:right;font-weight:700;border-top:2px solid #111">₹${fmtN(bill.grand)}</td></tr></tfoot>
+  </table>
+  <div style="display:flex;justify-content:flex-end;margin-top:.875rem">
+    <table style="font-size:12px;border-collapse:collapse;min-width:260px">
+      <tr><td style="padding:3px 12px;color:#6b7280">Taxable Amount</td><td style="padding:3px 8px;text-align:right">₹${fmtN(bill.subtotal)}</td></tr>
+      <tr><td style="padding:3px 12px;color:#6b7280">CGST</td><td style="padding:3px 8px;text-align:right">₹${fmtN(bill.gstTotal/2)}</td></tr>
+      <tr><td style="padding:3px 12px;color:#6b7280">SGST</td><td style="padding:3px 8px;text-align:right">₹${fmtN(bill.gstTotal/2)}</td></tr>
+      <tr style="border-top:1px solid #e5e7eb"><td style="padding:3px 12px;color:#6b7280">Total (before rounding)</td><td style="padding:3px 8px;text-align:right">₹${fmtN(bill.grand)}</td></tr>
+      ${roundOff!==0?('<tr><td style="padding:3px 12px;color:#6b7280">Round Off</td><td style="padding:3px 8px;text-align:right;color:'+(roundOff>0?'#166634':'#991b1b')+'">'+(roundOff>0?'+':'')+fmtN(roundOff)+'</td></tr>'):''}
+      <tr style="border-top:2px solid #111827"><td style="padding:6px 12px;font-weight:700;font-size:14px">Total Payable</td><td style="padding:6px 8px;text-align:right;font-weight:700;font-size:16px">₹${totalPayable}</td></tr>
+    </table>
   </div>
   ${bankHtml}
-  <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:1.5rem;padding-top:.875rem;border-top:1px dashed var(--bdr)">
-    <div style="font-size:11px;color:var(--t2)">धन्यवाद! फिर पधारें।</div>
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:1.5rem;padding-top:.875rem;border-top:1px dashed #e5e7eb">
+    <div style="font-size:11px;color:#6b7280">Thank you for your business!</div>
     <div style="text-align:center;width:160px">
-      <div style="height:52px;border-bottom:1px solid var(--t1);margin-bottom:4px"></div>
-      <div style="font-size:10px;color:var(--t2)">अधिकृत हस्ताक्षर</div>
+      <div style="height:52px;border-bottom:1px solid #111827;margin-bottom:4px"></div>
+      <div style="font-size:10px;color:#6b7280">Authorised Signatory</div>
     </div>
   </div>
-</div>
-<div class="fr no-print" style="margin-top:.875rem;justify-content:center">
-  <button class="btn btp bts" onclick="window.print()">🖨️ प्रिंट</button>
-  <a href="https://wa.me/?text=${wa}" target="_blank" style="text-decoration:none">
-    <button class="btn btg bts">📲 WhatsApp</button>
-  </a>
+</div>`;
+
+  const bp=document.getElementById('bpreview');if(!bp)return;
+  bp.innerHTML=billHtml+`
+<div class="fr no-print" style="margin-top:.875rem;justify-content:center;flex-wrap:wrap;gap:8px">
+  <button class="btn btp bts" onclick="printBill()">🖨️ Print</button>
+  <button class="btn bts" style="background:#e53e3e;color:#fff;border-color:#e53e3e" onclick="saveBillPDF(${bill.id})">📄 Save PDF</button>
+  <button class="btn btg bts" onclick="shareWhatsAppPDF(${bill.id})">📲 WhatsApp</button>
   <button class="btn bto bts" onclick="expBill(${bill.id})">📊 Excel</button>
 </div>`;
+}
+
+function printBill(){
+  const inner=document.getElementById('bill-content-inner');
+  if(!inner)return;
+  const pa=document.getElementById('bill-print-area');
+  if(!pa)return;
+  pa.innerHTML=inner.outerHTML;
+  pa.style.display='block';
+  window.print();
+  setTimeout(()=>{pa.style.display='none';pa.innerHTML=''},500);
+}
+
+function saveBillPDF(billId){
+  const inner=document.getElementById('bill-content-inner');
+  if(!inner){alert('पहले बिल बनाएं');return}
+  const s=D.settings||{};
+  const win=window.open('','_blank','width=700,height=900');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Invoice ${billNo(billId)}</title>
+<style>
+  body{font-family:Arial,sans-serif;margin:24px;color:#111;font-size:12px}
+  table{width:100%;border-collapse:collapse}
+  th{background:#f3f4f6;padding:6px 8px;text-align:left;font-weight:600}
+  td{padding:5px 8px;border-bottom:1px solid #e5e7eb}
+  .bph{text-align:center;border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:10px}
+  .bph h2{font-size:18px;margin:0}
+  .bmeta{display:flex;justify-content:space-between;margin-bottom:12px;font-size:11px}
+  .no-print{display:none}
+  @media print{.no-print{display:none}}
+</style></head><body>`);
+  win.document.write(inner.innerHTML);
+  win.document.write(`</body></html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(()=>win.print(),600);
+}
+
+async function shareWhatsAppPDF(billId){
+  const b=D.bills.find(x=>x.id===billId);
+  if(!b){alert('Bill not found');return}
+  const s=D.settings||{};
+  const d=new Date(b.date);
+  const ds=d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+  const roundOff=Math.round(b.grand)-b.grand;
+  const totalPayable=Math.round(b.grand);
+  const itemLines=b.items.map(function(it,n){return (n+1)+'. '+it.name+' x'+it.qty+' @ ₹'+fmtN(it.rate)+' (GST '+it.gst+'%) = *₹'+fmtN(it.total)+'*';}).join('\n');
+  const roundLine=roundOff!==0?('\nRound Off      : '+(roundOff>0?'+':'')+fmtN(roundOff)):'';
+  const msg='*'+(s.shopName||'Invoice')+'*'
+    +'\n'+(s.address||'')
+    +(s.gstin?'\nGSTIN: '+s.gstin:'')
+    +'\n\n*TAX INVOICE*'
+    +'\nInvoice No: '+billNo(b.id)
+    +'\nDate: '+ds
+    +'\nBill To: '+b.customer+(b.custGstin?'\nGSTIN: '+b.custGstin:'')
+    +'\nPayment: '+b.payment
+    +'\n\n*Items:*\n'+itemLines
+    +'\n\n───────────────────'
+    +'\nTaxable Amount : ₹'+fmtN(b.subtotal)
+    +'\nCGST           : ₹'+fmtN(b.gstTotal/2)
+    +'\nSGST           : ₹'+fmtN(b.gstTotal/2)
+    +'\nTotal          : ₹'+fmtN(b.grand)+roundLine
+    +'\n───────────────────'
+    +'\n*TOTAL PAYABLE : ₹'+totalPayable+'*'
+    +'\n───────────────────'
+    +(s.upiId?'\nUPI: '+s.upiId:'')
+    +'\n\nThank you for your business!';
+  const waURL='https://wa.me/?text='+encodeURIComponent(msg);
+  window.open(waURL,'_blank');
 }
 
 // ── INVENTORY ──
@@ -1474,12 +1611,16 @@ function renderSettings(){
   <div class="hr"></div>
   <div class="ct" style="margin-bottom:.625rem">बैंक विवरण (बिल पर दिखेगा)</div>
   <div class="g2">
+    <div class="fg"><label>Account Holder Name</label><input id="sah" value="${s.accountHolder||''}" placeholder="जैसे: Ramesh Kumar"></div>
     <div class="fg"><label>बैंक का नाम</label><input id="sbn" value="${s.bankName||''}" placeholder="SBI, HDFC, PNB..."></div>
+  </div>
+  <div class="g2">
     <div class="fg"><label>खाता नंबर</label><input id="sac" value="${s.accountNo||''}" placeholder="A/C नंबर"></div>
+    <div class="fg"><label>IFSC कोड</label><input id="sif" value="${s.ifsc||''}" placeholder="SBIN0001234"></div>
   </div>
   <div class="g2" style="margin-bottom:.875rem">
-    <div class="fg"><label>IFSC कोड</label><input id="sif" value="${s.ifsc||''}" placeholder="SBIN0001234"></div>
     <div class="fg"><label>UPI ID</label><input id="supi" value="${s.upiId||''}" placeholder="name@upi या 9876543210@paytm"></div>
+    <div class="fg"></div>
   </div>
   <button class="btn btp" onclick="saveSett()">💾 Settings Save करें</button></div>
 
@@ -1498,7 +1639,9 @@ async function saveSett(){
     shopName:document.getElementById('ss').value,gstin:document.getElementById('sgs').value,
     phone:document.getElementById('sph').value,state:document.getElementById('sst').value,
     address:document.getElementById('sad').value,billPrefix:document.getElementById('spfx').value.trim(),
-    nextBill:+document.getElementById('snxt').value||1,bankName:document.getElementById('sbn').value,
+    nextBill:+document.getElementById('snxt').value||1,
+    accountHolder:document.getElementById('sah').value,
+    bankName:document.getElementById('sbn').value,
     accountNo:document.getElementById('sac').value,ifsc:document.getElementById('sif').value,
     upiId:document.getElementById('supi').value
   });
