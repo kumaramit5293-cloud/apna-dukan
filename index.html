@@ -1476,7 +1476,7 @@ function expBill(id){const b=D.bills.find(x=>x.id===id);if(!b)return;dlCSV(csv([
 
 // ── LISTEN AUTH CHANGES (Google OAuth redirect के बाद) ──
 // Flag to prevent double-loading when renderRoot and onAuthStateChange both fire
-let _authHandled = false;
+// _authHandled declared at top of script
 
 sb.auth.onAuthStateChange(async(event,session)=>{
   if(event==='SIGNED_IN' && session && !currentUser && !_authHandled){
