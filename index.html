@@ -328,86 +328,11 @@ const MANIFEST={
 const mBlob=new Blob([JSON.stringify(MANIFEST)],{type:'application/json'});
 document.getElementById('pwa-manifest').href=URL.createObjectURL(mBlob);
 
-// ── SERVICE WORKER — blob scope fix for GitHub Pages ──
-// SW blob URL cannot control pages outside its origin-path.
-// Solution: write SW as inline script injected via a same-origin blob
-// with the correct scope header workaround.
-const SW_CODE=`
-const CACHE_NAME='apna-dukan-v3';
-const APP_URL='/apna-dukan/';
-
-self.addEventListener('install',e=>{
-  self.skipWaiting();
-  e.waitUntil(
-    caches.open(CACHE_NAME).then(c=>c.add(APP_URL)).catch(()=>{})
-  );
-});
-
-self.addEventListener('activate',e=>{
-  e.waitUntil(
-    caches.keys().then(keys=>
-      Promise.all(keys.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))
-    ).then(()=>self.clients.claim())
-  );
-});
-
-self.addEventListener('fetch',e=>{
-  if(e.request.method!=='GET')return;
-  const url=new URL(e.request.url);
-
-  // Supabase API — network first, no cache
-  if(url.hostname.includes('supabase.co')||url.hostname.includes('supabase.in')){
-    e.respondWith(
-      fetch(e.request).catch(()=>
-        new Response(JSON.stringify({error:'offline'}),
-          {status:503,headers:{'Content-Type':'application/json'}})
-      )
-    );
-    return;
-  }
-
-  // App shell (index.html) — cache first, fallback network
-  if(url.pathname===APP_URL||url.pathname===APP_URL+'index.html'){
-    e.respondWith(
-      caches.match(e.request).then(cached=>{
-        const network=fetch(e.request).then(r=>{
-          if(r.ok){caches.open(CACHE_NAME).then(c=>c.put(e.request,r.clone()));}
-          return r;
-        }).catch(()=>null);
-        return cached||network;
-      })
-    );
-    return;
-  }
-
-  // CDN (supabase-js) — cache first
-  if(url.hostname.includes('jsdelivr')||url.hostname.includes('cdnjs')){
-    e.respondWith(
-      caches.match(e.request).then(cached=>{
-        if(cached)return cached;
-        return fetch(e.request).then(r=>{
-          if(r.ok){caches.open(CACHE_NAME).then(c=>c.put(e.request,r.clone()));}
-          return r;
-        });
-      })
-    );
-    return;
-  }
-});
-`;
-
+// ── SERVICE WORKER — sw.js (GitHub Pages) ──
 if('serviceWorker' in navigator){
-  // Primary: use sw.js from same origin (required for proper scope on GitHub Pages)
-  navigator.serviceWorker.register('/apna-dukan/sw.js', {scope:'/apna-dukan/'})
-    .then(()=>console.log('SW registered via sw.js'))
-    .catch(err=>{
-      // Fallback: blob-based SW (works in browser, not in installed PWA)
-      const swBlob=new Blob([SW_CODE],{type:'application/javascript'});
-      const swURL=URL.createObjectURL(swBlob);
-      navigator.serviceWorker.register(swURL,{scope:'/apna-dukan/'})
-        .then(()=>console.log('SW registered via blob'))
-        .catch(e2=>console.log('SW unavailable:',e2.message));
-    });
+  navigator.serviceWorker.register('/apna-dukan/sw.js',{scope:'/apna-dukan/'})
+    .then(()=>console.log('SW: ok'))
+    .catch(()=>{}); // silently skip if sw.js not found
 }
 
 // ── OFFLINE DETECTION ──
@@ -1476,8 +1401,6 @@ function expBill(id){const b=D.bills.find(x=>x.id===id);if(!b)return;dlCSV(csv([
 
 // ── LISTEN AUTH CHANGES (Google OAuth redirect के बाद) ──
 // Flag to prevent double-loading when renderRoot and onAuthStateChange both fire
-// _authHandled declared at top of script
-
 sb.auth.onAuthStateChange(async(event,session)=>{
   if(event==='SIGNED_IN' && session && !currentUser && !_authHandled){
     // Only handle if renderRoot hasn't already handled it
