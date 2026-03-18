@@ -2,7 +2,13 @@
 <html lang="hi">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1a56db">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="अपना दुकान">
+<link rel="manifest" id="pwa-manifest">
 <title>अपना दुकान — GST बिलिंग ऐप</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -91,7 +97,134 @@ input:focus,select:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3
 .g4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:1.25rem}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:1rem}
 .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:.75rem}
-@media(max-width:720px){.g2,.g3,.g4{grid-template-columns:1fr}.app{flex-direction:column}.sidebar{width:100%;height:auto}.sidebar-footer{display:none}}
+
+/* ── DESKTOP SIDEBAR ── */
+@media(min-width:721px){
+  .bottom-nav{display:none!important}
+  .content{padding-bottom:1.25rem}
+}
+
+/* ── MOBILE: hide sidebar, show bottom nav ── */
+@media(max-width:720px){
+  .g2,.g3,.g4{grid-template-columns:1fr}
+  .sidebar{display:none!important}
+  .app{flex-direction:column}
+  .main{height:100vh}
+  .topbar{padding:.625rem 1rem;safe-area-inset-top:env(safe-area-inset-top)}
+  .content{padding:1rem 1rem 90px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .bottom-nav{display:flex!important}
+}
+
+/* ── BOTTOM NAVIGATION ── */
+.bottom-nav{
+  display:none;
+  position:fixed;bottom:0;left:0;right:0;
+  background:var(--bg1);
+  border-top:1px solid var(--bdr);
+  height:62px;
+  padding-bottom:env(safe-area-inset-bottom);
+  z-index:300;
+  align-items:stretch;
+  box-shadow:0 -2px 12px rgba(0,0,0,.08);
+}
+.bn-item{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:3px;cursor:pointer;color:var(--t2);font-size:10px;font-weight:500;
+  transition:color .15s;padding:6px 2px;border:none;background:none;
+  -webkit-tap-highlight-color:transparent;
+}
+.bn-item.on{color:var(--acc)}
+.bn-item svg{width:20px;height:20px;flex-shrink:0}
+.bn-fab{
+  flex:0 0 56px;display:flex;align-items:center;justify-content:center;
+  margin:0 8px;margin-bottom:2px;
+}
+.bn-fab-btn{
+  width:52px;height:52px;border-radius:50%;background:var(--acc);
+  display:flex;align-items:center;justify-content:center;
+  border:none;cursor:pointer;box-shadow:0 4px 12px rgba(26,86,219,.4);
+  -webkit-tap-highlight-color:transparent;transition:transform .15s;
+}
+.bn-fab-btn:active{transform:scale(.95)}
+.bn-fab-btn svg{width:24px;height:24px;color:#fff}
+
+/* ── CAMERA SCANNER ── */
+.scanner-wrap{
+  position:fixed;top:0;left:0;width:100%;height:100%;
+  background:#000;z-index:800;display:flex;flex-direction:column;
+}
+.scanner-topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:1rem 1.25rem;padding-top:calc(1rem + env(safe-area-inset-top));
+  background:rgba(0,0,0,.7);color:#fff;
+}
+.scanner-topbar h2{font-size:16px;font-weight:600}
+.scanner-video-wrap{
+  flex:1;position:relative;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;
+}
+#scanner-video{width:100%;height:100%;object-fit:cover}
+.scanner-overlay{
+  position:absolute;top:0;left:0;width:100%;height:100%;
+  display:flex;align-items:center;justify-content:center;
+  pointer-events:none;
+}
+.scanner-frame{
+  width:72vw;max-width:280px;height:72vw;max-height:280px;
+  border:3px solid #1a56db;border-radius:16px;position:relative;
+  box-shadow:0 0 0 9999px rgba(0,0,0,.55);
+}
+.scanner-frame::before,.scanner-frame::after{
+  content:'';position:absolute;width:24px;height:24px;border-color:#fff;border-style:solid;
+}
+.scanner-frame::before{top:-3px;left:-3px;border-width:4px 0 0 4px;border-radius:3px 0 0 0}
+.scanner-frame::after{bottom:-3px;right:-3px;border-width:0 4px 4px 0;border-radius:0 0 3px 0}
+.scanner-line{
+  position:absolute;top:0;left:0;right:0;height:3px;
+  background:linear-gradient(90deg,transparent,#1a56db,transparent);
+  animation:scanline 2s linear infinite;
+}
+@keyframes scanline{0%{top:0}100%{top:100%}}
+.scanner-hint{
+  color:#fff;font-size:13px;text-align:center;
+  padding:.875rem;background:rgba(0,0,0,.7);
+}
+.scanner-manual{
+  padding:1rem;background:rgba(0,0,0,.8);
+  display:flex;gap:8px;padding-bottom:calc(1rem + env(safe-area-inset-bottom));
+}
+.scanner-manual input{
+  flex:1;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.3);
+  color:#fff;
+}
+.scanner-manual input::placeholder{color:rgba(255,255,255,.5)}
+
+/* ── OFFLINE BANNER ── */
+#offline-banner{
+  display:none;position:fixed;top:0;left:0;right:0;
+  background:#92400e;color:#fef3c7;
+  padding:.5rem 1rem;font-size:12px;text-align:center;z-index:999;
+  padding-top:calc(.5rem + env(safe-area-inset-top));
+}
+
+/* ── PWA INSTALL PROMPT ── */
+#install-prompt{
+  display:none;position:fixed;bottom:80px;left:1rem;right:1rem;
+  background:var(--bg1);border:1px solid var(--bdr);border-radius:12px;
+  padding:1rem;z-index:400;box-shadow:0 4px 20px rgba(0,0,0,.15);
+}
+
+/* ── TOUCH IMPROVEMENTS ── */
+.btn{min-height:44px}
+.nav{min-height:44px;display:flex;align-items:center}
+input,select{min-height:44px}
+@media(max-width:720px){
+  .card{padding:.875rem}
+  .btn{font-size:14px}
+  td,th{padding:8px 8px}
+  .no-mobile{display:none}
+  #toast{bottom:72px}
+}
 .card{background:var(--bg1);border-radius:12px;border:1px solid var(--bdr);padding:1rem 1.25rem;margin-bottom:1rem}
 .ct{font-size:13px;font-weight:600;margin-bottom:.875rem;color:var(--t1)}
 .sc{background:var(--bg2);border-radius:9px;padding:.875rem 1rem}
@@ -152,9 +285,22 @@ input.total-inp:focus{background:var(--accl)}
 </style>
 </head>
 <body>
+<div id="offline-banner">📵 Internet नहीं है — Offline mode में काम हो रहा है</div>
 <div id="root"></div>
 <div id="toast"></div>
 <div id="modal-root"></div>
+<div id="scanner-root"></div>
+<div id="install-prompt">
+  <div style="display:flex;align-items:center;gap:12px">
+    <div style="font-size:28px">🏪</div>
+    <div style="flex:1">
+      <div style="font-size:13px;font-weight:600;margin-bottom:2px">Home Screen पर Install करें</div>
+      <div style="font-size:11px;color:var(--t2)">ऐप की तरह use करें — बिना browser के</div>
+    </div>
+    <button class="btn bts btd" onclick="document.getElementById('install-prompt').style.display='none'" style="flex-shrink:0">✕</button>
+  </div>
+  <button class="btn btp" style="width:100%;margin-top:.75rem" id="install-btn" onclick="installPWA()">📲 Install करें</button>
+</div>
 <script>
 // ============================================================
 //  !! यहाँ सिर्फ अपनी Supabase details बदलें !!
@@ -162,6 +308,68 @@ input.total-inp:focus{background:var(--accl)}
 const SB_URL = 'https://ouusbkidjfxnyoertlhz.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im91dXNia2lkamZ4bnlvZXJ0bGh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NzcwMDMsImV4cCI6MjA4OTM1MzAwM30.qk0t2dSFCxh_0emTaVPPUKFbFII0wpIKwB7MRR_Wa8Y';
 // ============================================================
+
+// ── PWA MANIFEST (inline) ──
+const MANIFEST={name:'अपना दुकान',short_name:'दुकान',description:'GST बिलिंग ऐप',start_url:'./',display:'standalone',background_color:'#f3f4f6',theme_color:'#1a56db',orientation:'portrait-primary',icons:[{src:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="80" fill="%231a56db"/><text y="340" x="256" text-anchor="middle" font-size="300" font-family="sans-serif">🏪</text></svg>',sizes:'512x512',type:'image/svg+xml',purpose:'any maskable'}]};
+const mBlob=new Blob([JSON.stringify(MANIFEST)],{type:'application/json'});
+document.getElementById('pwa-manifest').href=URL.createObjectURL(mBlob);
+
+// ── SERVICE WORKER (inline via blob) ──
+const SW_CODE=`
+const CACHE='apna-dukan-v1';
+const ASSETS=['/'];
+self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()))});
+self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
+self.addEventListener('fetch',e=>{
+  if(e.request.method!=='GET')return;
+  const url=new URL(e.request.url);
+  if(url.origin.includes('supabase')){
+    e.respondWith(fetch(e.request).catch(()=>new Response(JSON.stringify({error:'offline'}),{headers:{'Content-Type':'application/json'}})));
+    return;
+  }
+  e.respondWith(caches.match(e.request).then(cached=>{
+    const fresh=fetch(e.request).then(r=>{if(r.ok){const c=r.clone();caches.open(CACHE).then(cache=>cache.put(e.request,c))}return r}).catch(()=>null);
+    return cached||fresh;
+  }));
+});
+`;
+if('serviceWorker' in navigator){
+  const swBlob=new Blob([SW_CODE],{type:'application/javascript'});
+  const swURL=URL.createObjectURL(swBlob);
+  navigator.serviceWorker.register(swURL,{scope:'./'}).then(reg=>{
+    console.log('SW registered');
+  }).catch(e=>console.log('SW error:',e));
+}
+
+// ── OFFLINE DETECTION ──
+function updateOnlineStatus(){
+  const banner=document.getElementById('offline-banner');
+  if(banner)banner.style.display=navigator.onLine?'none':'block';
+}
+window.addEventListener('online',updateOnlineStatus);
+window.addEventListener('offline',updateOnlineStatus);
+updateOnlineStatus();
+
+// ── PWA INSTALL ──
+let deferredInstall=null;
+window.addEventListener('beforeinstallprompt',e=>{
+  e.preventDefault();deferredInstall=e;
+  const prompt=document.getElementById('install-prompt');
+  if(prompt)setTimeout(()=>prompt.style.display='block',3000);
+});
+window.addEventListener('appinstalled',()=>{
+  const prompt=document.getElementById('install-prompt');
+  if(prompt)prompt.style.display='none';
+  deferredInstall=null;
+  toast('ऐप install हो गया! ✓');
+});
+async function installPWA(){
+  if(!deferredInstall)return;
+  deferredInstall.prompt();
+  const{outcome}=await deferredInstall.userChoice;
+  if(outcome==='accepted'){document.getElementById('install-prompt').style.display='none'}
+  deferredInstall=null;
+}
 
 const HSN_DB=[
   {code:'3401',desc:'Soap, surface-active products',gst:18,keys:['soap','sabun','dettol','lifebuoy']},
@@ -422,6 +630,16 @@ function renderApp(){
   const uname=s.shopName||email.split('@')[0];
   const tabs=['dashboard','billing','udhar','inventory','customers','bills','reports','settings'];
   const labels=['डैशबोर्ड','GST बिल','उधार','इनवेंटरी','कस्टमर','बिल इतिहास','रिपोर्ट','सेटिंग्स'];
+
+  // Bottom nav shows only main tabs (5 items + FAB for billing)
+  const bnTabs=[
+    {id:'dashboard',label:'होम',icon:'<path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" stroke-linecap="round" stroke-linejoin="round"/>'},
+    {id:'inventory',label:'इनवेंटरी',icon:'<path d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" stroke-linecap="round" stroke-linejoin="round"/>'},
+    {id:'__fab__',label:'बिल',icon:'<path d="M12 4v16m8-8H4" stroke-linecap="round" stroke-linejoin="round"/>'},
+    {id:'udhar',label:'उधार',icon:'<path d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" stroke-linecap="round" stroke-linejoin="round"/>'},
+    {id:'bills',label:'बिल इतिहास',icon:'<path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke-linecap="round" stroke-linejoin="round"/>'},
+  ];
+
   document.getElementById('root').innerHTML=`
 <div class="app">
 <div class="sidebar">
@@ -446,15 +664,33 @@ function renderApp(){
   <div class="topbar">
     <h1 id="ptitle">${labels[tabs.indexOf(activeTab)]}</h1>
     <div class="fr">
-      <button class="btn bts" onclick="syncAll()" title="Cloud से sync करें">↻ Sync</button>
-      <button class="btn btp bts" onclick="sw('billing')">+ नया बिल</button>
+      <button class="btn bts" onclick="openCameraScanner()" title="Barcode Scan">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 17h3v3h-3z"/></svg>
+        <span class="no-mobile">Scan</span>
+      </button>
+      <button class="btn bts" onclick="syncAll()" title="Sync">↻ <span class="no-mobile">Sync</span></button>
+      <button class="btn btp bts" onclick="sw('billing')">+ <span class="no-mobile">नया बिल</span></button>
     </div>
   </div>
   <div class="content">
     ${tabs.map(t=>`<div id="tab-${t}" class="tab${activeTab===t?' on':''}"></div>`).join('')}
   </div>
 </div>
-</div>`;
+</div>
+
+<!-- BOTTOM NAV (mobile only) -->
+<nav class="bottom-nav" id="bottom-nav">
+  ${bnTabs.map(item=>item.id==='__fab__'?`
+  <div class="bn-fab">
+    <button class="bn-fab-btn" onclick="sw('billing')" title="नया बिल">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">${item.icon}</svg>
+    </button>
+  </div>`:`
+  <button class="bn-item${activeTab===item.id?' on':''}" onclick="sw('${item.id}')" type="button">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">${item.icon}</svg>
+    <span>${item.label}</span>
+  </button>`).join('')}
+</nav>`;
   renderAllTabs();updSync(syncOk);
 }
 
@@ -465,7 +701,11 @@ function sw(id){
   document.querySelectorAll('.nav').forEach((n,i)=>n.classList.toggle('on',['dashboard','billing','udhar','inventory','customers','bills','reports','settings'][i]===id));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
   const tab=document.getElementById('tab-'+id);if(tab)tab.classList.add('on');
+  // Update bottom nav active state
+  document.querySelectorAll('.bn-item').forEach(b=>b.classList.toggle('on',b.getAttribute('onclick')?.includes("sw('"+id+"')")));
   renderTab(id);
+  // Scroll to top on mobile tab switch
+  const content=document.querySelector('.content');if(content)content.scrollTop=0;
 }
 function renderTab(id){({dashboard:renderDash,billing:renderBilling,udhar:renderUdhar,inventory:renderInv,customers:renderCust,bills:renderBillsTab,reports:renderReports,settings:renderSettings})[id]?.()}
 function renderAllTabs(){['dashboard','billing','udhar','inventory','customers','bills','reports','settings'].forEach(renderTab)}
@@ -864,7 +1104,122 @@ async function quickSaveCust(){
 }
 function closeModal(){document.getElementById('modal-root').innerHTML=''}
 
-// ── UDHAR TAB ──
+// ── CAMERA BARCODE SCANNER ──
+let scanStream=null,scanInterval=null;
+
+async function openCameraScanner(){
+  const root=document.getElementById('scanner-root');
+  root.innerHTML=`
+<div class="scanner-wrap" id="scanner-wrap">
+  <div class="scanner-topbar">
+    <h2>📷 बारकोड स्कैन करें</h2>
+    <button onclick="closeScanner()" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:8px 16px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:500">✕ बंद करें</button>
+  </div>
+  <div class="scanner-video-wrap">
+    <video id="scanner-video" autoplay playsinline muted></video>
+    <div class="scanner-overlay">
+      <div class="scanner-frame">
+        <div class="scanner-line"></div>
+      </div>
+    </div>
+  </div>
+  <div class="scanner-hint">बारकोड को frame के अंदर रखें</div>
+  <div class="scanner-manual">
+    <input id="scan-inp" placeholder="या बारकोड manually डालें..." onkeydown="if(event.key==='Enter')manualScanLookup()">
+    <button onclick="manualScanLookup()" style="background:var(--acc);color:#fff;border:none;padding:9px 16px;border-radius:9px;font-size:13px;cursor:pointer;white-space:nowrap">खोजें</button>
+  </div>
+  <div id="scan-result" style="padding:.875rem;display:none"></div>
+</div>`;
+
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}
+    });
+    scanStream=stream;
+    const video=document.getElementById('scanner-video');
+    video.srcObject=stream;await video.play();
+
+    if('BarcodeDetector' in window){
+      const detector=new BarcodeDetector({formats:['ean_13','ean_8','code_128','code_39','qr_code','upc_a','upc_e','itf']});
+      scanInterval=setInterval(async()=>{
+        try{
+          const barcodes=await detector.detect(video);
+          if(barcodes.length>0){clearInterval(scanInterval);onBarcodeDetected(barcodes[0].rawValue);}
+        }catch(e){}
+      },350);
+    }else{
+      const hint=document.querySelector('.scanner-hint');
+      if(hint)hint.textContent='Camera ready — नीचे manually भी डाल सकते हैं';
+    }
+  }catch(e){
+    const hint=document.querySelector('.scanner-hint');
+    if(hint)hint.innerHTML='<span style="color:#fca5a5">कैमरा access नहीं मिला।</span> नीचे manually डालें।';
+    const inp=document.getElementById('scan-inp');if(inp)inp.focus();
+  }
+}
+
+function closeScanner(){
+  if(scanInterval){clearInterval(scanInterval);scanInterval=null;}
+  if(scanStream){scanStream.getTracks().forEach(t=>t.stop());scanStream=null;}
+  const root=document.getElementById('scanner-root');if(root)root.innerHTML='';
+}
+
+function onBarcodeDetected(code){
+  if(navigator.vibrate)navigator.vibrate([100,50,100]);
+  const prod=D.products.find(p=>p.barcode&&p.barcode===code);
+  const el=document.getElementById('scan-result');
+  if(!el)return;
+  el.style.display='block';
+  if(prod){
+    el.style.cssText='padding:.875rem;background:var(--ok-bg);border-top:1px solid var(--bdr)';
+    el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center">
+      <div><b style="color:var(--ok-t)">✓ ${prod.name}</b><br><span style="font-size:12px;color:var(--t2)">${fmt(prod.sellPrice)} | GST ${prod.gst}% | स्टॉक: ${prod.stock}</span></div>
+      <button onclick="addFromScan(${prod.id})" style="background:var(--acc);color:#fff;border:none;padding:9px 14px;border-radius:9px;font-size:13px;cursor:pointer;white-space:nowrap">+ बिल में</button>
+    </div>`;
+  }else{
+    el.style.cssText='padding:.875rem;background:var(--warn-bg);border-top:1px solid var(--bdr)';
+    el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center">
+      <div><b style="color:var(--warn-t)">${code}</b><br><span style="font-size:12px;color:var(--t2)">इनवेंटरी में नहीं मिला</span></div>
+      <button onclick="addFromScanNew('${code}')" style="background:#217346;color:#fff;border:none;padding:9px 14px;border-radius:9px;font-size:13px;cursor:pointer;white-space:nowrap">+ नया प्रोडक्ट</button>
+    </div>`;
+    setTimeout(()=>{
+      if(scanStream&&'BarcodeDetector' in window){
+        const video=document.getElementById('scanner-video');
+        if(video&&!scanInterval){
+          const d=new BarcodeDetector({formats:['ean_13','ean_8','code_128','code_39','qr_code','upc_a','upc_e','itf']});
+          scanInterval=setInterval(async()=>{try{const b=await d.detect(video);if(b.length>0){clearInterval(scanInterval);scanInterval=null;onBarcodeDetected(b[0].rawValue);}}catch(e){}},350);
+        }
+      }
+    },3000);
+  }
+}
+
+function manualScanLookup(){
+  const code=(document.getElementById('scan-inp')?.value||'').trim();
+  if(!code){alert('बारकोड डालें');return}
+  onBarcodeDetected(code);
+}
+
+function addFromScan(prodId){
+  const p=D.products.find(x=>x.id===prodId);if(!p)return;
+  closeScanner();sw('billing');
+  setTimeout(()=>{
+    const inp=document.getElementById('sp-text');if(inp)inp.value=p.name;
+    const sr=document.getElementById('sr');if(sr)sr.value=p.sellPrice;
+    const sg=document.getElementById('sg');if(sg)sg.value=p.gst;
+    const sh=document.getElementById('sh');if(sh)sh.value=p.hsn||'';
+    syncTotal();toast(p.name+' तैयार — मात्रा और + दबाएं');
+  },120);
+}
+
+function addFromScanNew(barcode){
+  closeScanner();sw('inventory');
+  setTimeout(()=>{
+    const pbar=document.getElementById('pbar');if(pbar)pbar.value=barcode;
+    const pn=document.getElementById('pn');if(pn){pn.focus();pn.scrollIntoView({behavior:'smooth'});}
+    toast('बारकोड भरा — बाकी details डालें');
+  },120);
+}
 function renderUdhar(){
   const el=document.getElementById('tab-udhar');if(!el)return;
   const udharList=D.customers.filter(c=>+c.udhar>0).sort((a,b)=>b.udhar-a.udhar);
