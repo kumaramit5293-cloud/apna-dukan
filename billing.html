@@ -382,34 +382,72 @@ let sb, currentUser=null, currentShop=null, activeTab='dashboard';
 let D={products:[],customers:[],bills:[],billItems:[],udhar:[],settings:{}};
 let syncOk=false, _authHandled=false;
 
-// Wait for Supabase to be ready
+// ── SUPABASE INIT ──
 function initApp() {
   if (typeof window.supabase === 'undefined') {
     setTimeout(initApp, 50);
     return;
   }
-  sb = window.supabase.createClient(SB_URL, SB_KEY);
+  sb = window.supabase.createClient(SB_URL, SB_KEY, {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: true,
+      storage: localStorage
+    }
+  });
 
-  // ── LISTEN AUTH CHANGES (Google OAuth redirect) ──
-  sb.auth.onAuthStateChange(async(event,session)=>{
+  sb.auth.onAuthStateChange(async(event, session)=>{
+    console.log('Auth event:', event);
     if(event==='SIGNED_IN' && session && !currentUser && !_authHandled){
       _authHandled = true;
-      currentUser=session.user;
+      currentUser = session.user;
       await loadShopForUser();
     }
-    if(event==='TOKEN_REFRESHED' && session && currentUser){
+    if(event==='TOKEN_REFRESHED' && session){
+      if(currentUser) localStorage.setItem('sb-session', JSON.stringify(session));
       return;
     }
     if(event==='SIGNED_OUT'){
-      currentUser=null;
-      _authHandled=false;
+      currentUser=null; _authHandled=false;
       renderAuth('login');
+    }
+    if(event==='PASSWORD_RECOVERY'){
+      renderPasswordReset();
     }
   });
 
   renderRoot();
 }
-// sb initialized via initApp()
+
+// ── PASSWORD RESET PAGE ──
+function renderPasswordReset(){
+  document.getElementById('root').innerHTML=`
+<div class="auth-wrap"><div class="auth-card">
+  <div class="auth-logo"><div style="font-size:32px;margin-bottom:.5rem">🔐</div>
+    <h1>Set New Password</h1><p>Enter your new password below</p>
+  </div>
+  <div id="auth-alert"></div>
+  <div class="fg"><label>New Password (min. 6 characters)</label>
+    <input id="a-newpass" type="password" placeholder="New Password" autofocus>
+  </div>
+  <div class="fg"><label>Confirm Password</label>
+    <input id="a-conpass" type="password" placeholder="Re-enter Password"
+      onkeydown="if(event.key==='Enter')doSetNewPassword()">
+  </div>
+  <button class="btn btp btn-block" onclick="doSetNewPassword()">✓ Update Password</button>
+</div></div>`;
+}
+async function doSetNewPassword(){
+  const p1=document.getElementById('a-newpass').value;
+  const p2=document.getElementById('a-conpass').value;
+  if(!p1||p1.length<6){setAlert('auth-alert','Password must be at least 6 characters');return;}
+  if(p1!==p2){setAlert('auth-alert','Passwords do not match');return;}
+  const {error}=await sb.auth.updateUser({password:p1});
+  if(error){setAlert('auth-alert','Error: '+error.message);return;}
+  setAlert('auth-alert','✓ Password updated successfully! Logging you in...','ok');
+  setTimeout(()=>renderRoot(),1500);
+}
 
 // ── UTILS ──
 const fmt=n=>'₹'+parseFloat(n||0).toFixed(2);
@@ -424,46 +462,126 @@ function setAlert(id,msg,type='err'){const el=document.getElementById(id);if(el)
 
 // ── INIT ──
 async function renderRoot(){
-  document.getElementById('root').innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh"><div class="loader"></div></div>';
-  try{
-    // 10 second timeout
-    const sessionPromise=sb.auth.getSession();
-    const timeoutPromise=new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),10000));
-    const result=await Promise.race([sessionPromise,timeoutPromise]);
-    const session=result?.data?.session;
-    if(!session){
-      // Try once more from local storage before giving up
-      const cached=localStorage.getItem('sb-session');
-      if(cached){
-        try{
-          const parsed=JSON.parse(cached);
-          if(parsed?.access_token&&parsed?.user){
-            currentUser=parsed.user;
-            _authHandled=true;
+  // Show loading spinner
+  document.getElementById('root').innerHTML=`
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px">
+    <div class="loader" style="width:32px;height:32px;border-width:3px"></div>
+    <div id="load-msg" style="font-size:13px;color:var(--t2)">Connecting to server...</div>
+  </div>`;
+
+  const setMsg = m => { const e=document.getElementById('load-msg'); if(e) e.textContent=m; };
+
+  // ── STEP 1: Check if Supabase project is reachable ──
+  try {
+    setMsg('Checking server connection...');
+    const pingRes = await Promise.race([
+      fetch(SB_URL+'/rest/v1/', {
+        headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer '+SB_KEY }
+      }),
+      new Promise((_,r)=>setTimeout(()=>r(new Error('timeout')),8000))
+    ]);
+
+    if(!pingRes.ok && pingRes.status !== 401 && pingRes.status !== 400) {
+      // Project might be paused
+      showConnectionError(pingRes.status);
+      return;
+    }
+  } catch(pingErr) {
+    if(pingErr.message==='timeout' || pingErr.message?.includes('fetch')) {
+      showConnectionError('network');
+      return;
+    }
+  }
+
+  // ── STEP 2: Check existing session ──
+  try {
+    setMsg('Checking login status...');
+    const sessionPromise = sb.auth.getSession();
+    const timeoutPromise = new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),10000));
+    const result = await Promise.race([sessionPromise, timeoutPromise]);
+    const session = result?.data?.session;
+
+    if(session){
+      _authHandled = true;
+      currentUser = session.user;
+      localStorage.setItem('sb-session', JSON.stringify(session));
+      await loadShopForUser();
+      return;
+    }
+
+    // No active session — try cached
+    const cached = localStorage.getItem('sb-session');
+    if(cached){
+      try{
+        const parsed = JSON.parse(cached);
+        if(parsed?.access_token && parsed?.user){
+          // Try refreshing
+          const {data:refreshed, error:re} = await sb.auth.refreshSession({refresh_token: parsed.refresh_token});
+          if(!re && refreshed?.session){
+            currentUser = refreshed.session.user;
+            _authHandled = true;
+            localStorage.setItem('sb-session', JSON.stringify(refreshed.session));
             await loadShopForUser();
             return;
           }
-        }catch(e2){}
-      }
-      renderAuth('login');return;
+        }
+      }catch(e2){ localStorage.removeItem('sb-session'); }
     }
-    _authHandled=true;
-    currentUser=session.user;
-    // Cache session locally
-    localStorage.setItem('sb-session',JSON.stringify(session));
-    await loadShopForUser();
-  }catch(e){
-    console.log('renderRoot error:',e.message);
-    // Network error — try cached session
-    const cached=localStorage.getItem('sb-session');
+
+    renderAuth('login');
+
+  } catch(e){
+    console.log('renderRoot error:', e.message);
+    // Offline — try cached session
+    const cached = localStorage.getItem('sb-session');
     if(cached){
       try{
-        const parsed=JSON.parse(cached);
-        if(parsed?.user){currentUser=parsed.user;_authHandled=true;await loadShopForUser();return;}
+        const parsed = JSON.parse(cached);
+        if(parsed?.user){
+          currentUser = parsed.user;
+          _authHandled = true;
+          await loadShopForUser();
+          return;
+        }
       }catch(e2){}
     }
     renderAuth('login');
   }
+}
+
+function showConnectionError(status){
+  const isPaused = (status===503||status===404||status==='network');
+  document.getElementById('root').innerHTML=`
+<div class="auth-wrap">
+<div class="auth-card" style="text-align:center">
+  <div style="font-size:48px;margin-bottom:1rem">${isPaused?'😴':'📡'}</div>
+  <h2 style="font-size:18px;margin-bottom:.5rem">${isPaused?'Server Paused / Unreachable':'No Internet Connection'}</h2>
+  <p style="font-size:13px;color:var(--t2);margin-bottom:1.25rem;line-height:1.6">
+    ${isPaused
+      ? `Your Supabase project may be <b>paused</b> (free tier pauses after 1 week of inactivity).<br><br>
+         <b>Fix:</b> Go to <a href="https://supabase.com/dashboard" target="_blank" style="color:var(--acc)">supabase.com/dashboard</a> → 
+         Select your project → Click <b>"Restore project"</b>.<br><br>
+         Status code: ${status}`
+      : 'Please check your internet connection and try again.'}
+  </p>
+  <button class="btn btp btn-block" onclick="renderRoot()" style="margin-bottom:.75rem">🔄 Retry Connection</button>
+  ${isPaused?'':''}
+  <button class="btn btn-block" onclick="offlineMode()" style="margin-top:.5rem">📱 Continue Offline (local data only)</button>
+</div>
+</div>`;
+}
+
+function offlineMode(){
+  const cached = localStorage.getItem('sb-session');
+  if(cached){
+    try{
+      const parsed = JSON.parse(cached);
+      if(parsed?.user){ currentUser=parsed.user; loadShopForUser(); return; }
+    }catch(e){}
+  }
+  // No cached user — show auth but warn
+  renderAuth('login');
+  setTimeout(()=>setAlert('auth-alert','⚠️ Offline mode — Login may not work without internet.','warn'),100);
 }
 
 // ── AUTH SCREEN ──
@@ -486,7 +604,7 @@ function renderAuth(tab='login'){
 
   ${tab==='login'?`
     <div class="fg"><label>Email Address</label>
-      <input id="a-email" type="email" placeholder="your@gmail.com" autocomplete="email">
+      <input id="a-email" type="email" placeholder="your@gmail.com" autocomplete="email" autofocus>
     </div>
     <div class="fg"><label>Password</label>
       <input id="a-pass" type="password" placeholder="Password" autocomplete="current-password"
@@ -507,7 +625,7 @@ function renderAuth(tab='login'){
     </button>
   `:`
     <div class="fg"><label>Shop Name *</label>
-      <input id="a-shop" placeholder="e.g. ShreeRam Traders">
+      <input id="a-shop" placeholder="e.g. ShreeRam Traders" autofocus>
     </div>
     <div class="fg"><label>Email Address *</label>
       <input id="a-email" type="email" placeholder="your@gmail.com" autocomplete="email">
@@ -537,8 +655,47 @@ function renderAuth(tab='login'){
       After Google signup, add your shop name in Settings
     </p>
   `}
+
+  <div style="margin-top:1rem;border-top:1px solid var(--bdr);padding-top:.75rem">
+    <details style="font-size:11px;color:var(--t2)">
+      <summary style="cursor:pointer;font-weight:600;color:var(--t2);list-style:none">
+        ⚙️ Supabase Setup / Troubleshoot ▾
+      </summary>
+      <div style="margin-top:.625rem;line-height:1.8;background:var(--bg2);border-radius:8px;padding:.75rem">
+        <b>If login/signup is not working:</b><br>
+        <b>Step 1:</b> Go to <a href="https://supabase.com/dashboard" target="_blank" style="color:var(--acc)">supabase.com/dashboard</a><br>
+        <b>Step 2:</b> Select your project → <i>If paused, click "Restore"</i><br>
+        <b>Step 3:</b> Authentication → Providers → Enable <b>Email</b><br>
+        <b>Step 4:</b> Authentication → Email Templates → set <b>Redirect URL</b> to:<br>
+        <code style="display:block;background:var(--bg3);padding:4px 8px;border-radius:5px;margin:4px 0;word-break:break-all;font-size:10px">${window.location.origin+window.location.pathname}</code>
+        <b>Step 5 (optional):</b> Authentication → Settings → Disable <b>"Confirm email"</b> for instant login without email verification.<br>
+        <br>
+        <button class="btn bts btp" onclick="testConnection()" style="width:100%">🔌 Test Connection Now</button>
+      </div>
+    </details>
+  </div>
 </div>
 </div>`;
+}
+
+async function testConnection(){
+  const alertEl = document.getElementById('auth-alert');
+  if(alertEl) alertEl.innerHTML='<div class="alert alert-info">Testing connection...</div>';
+  try{
+    const r = await Promise.race([
+      fetch(SB_URL+'/rest/v1/',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}}),
+      new Promise((_,rj)=>setTimeout(()=>rj(new Error('timeout after 8s')),8000))
+    ]);
+    if(r.ok || r.status===401 || r.status===400){
+      setAlert('auth-alert','✅ Supabase connection OK (status '+r.status+'). Server is reachable.','ok');
+    } else if(r.status===503){
+      setAlert('auth-alert','😴 Supabase project is PAUSED. Go to dashboard and click "Restore project".');
+    } else {
+      setAlert('auth-alert','⚠️ Unexpected status: '+r.status);
+    }
+  }catch(e){
+    setAlert('auth-alert','❌ Cannot reach server: '+e.message+'<br>Check your internet connection.');
+  }
 }
 
 function renderForgot(){
@@ -562,57 +719,180 @@ async function doLogin(){
   const email=document.getElementById('a-email').value.trim();
   const pass=document.getElementById('a-pass').value;
   if(!email||!pass){setAlert('auth-alert','Please enter Email and Password');return;}
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){setAlert('auth-alert','Please enter a valid email address');return;}
   const btn=document.getElementById('auth-btn');
-  btn.disabled=true;btn.innerHTML='<span class="loader"></span> Verifying...';
-  const {data,error}=await sb.auth.signInWithPassword({email,password:pass});
-  if(error){setAlert('auth-alert',error.message==='Invalid login credentials'?'Invalid Email or Password':error.message);btn.disabled=false;btn.textContent='Login →';return;}
-  currentUser=data.user;
-  localStorage.setItem('sb-session',JSON.stringify(data.session));
-  await loadShopForUser();
+  btn.disabled=true;
+  btn.innerHTML='<span class="loader"></span> Logging in...';
+  setAlert('auth-alert','');
+
+  try{
+    const {data,error}=await sb.auth.signInWithPassword({email,password:pass});
+    if(error){
+      btn.disabled=false; btn.textContent='Login →';
+      // Detailed error messages
+      const code = error.message?.toLowerCase()||'';
+      if(code.includes('invalid login') || code.includes('invalid credentials') || code.includes('wrong')){
+        setAlert('auth-alert','❌ Wrong email or password. Please check and try again.');
+      } else if(code.includes('email not confirmed')){
+        setAlert('auth-alert',`
+          ⚠️ Your email is not confirmed yet.<br>
+          <small>Check your inbox (and spam folder) for the confirmation email.</small><br>
+          <button class="btn bts btp" style="margin-top:8px" onclick="resendConfirmation('${email}')">
+            📧 Resend Confirmation Email
+          </button>
+        `);
+      } else if(code.includes('rate limit') || code.includes('too many')){
+        setAlert('auth-alert','⏳ Too many attempts. Please wait a few minutes and try again.');
+      } else if(code.includes('network') || code.includes('fetch')){
+        setAlert('auth-alert','📡 Network error. Please check your internet connection.');
+      } else {
+        setAlert('auth-alert','❌ '+error.message);
+      }
+      return;
+    }
+    currentUser=data.user;
+    localStorage.setItem('sb-session',JSON.stringify(data.session));
+    await loadShopForUser();
+  } catch(e){
+    btn.disabled=false; btn.textContent='Login →';
+    setAlert('auth-alert','📡 Connection failed. Check internet and try again.<br><small>'+e.message+'</small>');
+  }
 }
 
 async function doSignup(){
   const shopName=document.getElementById('a-shop').value.trim();
   const email=document.getElementById('a-email').value.trim();
   const pass=document.getElementById('a-pass').value;
-  const gstin=(document.getElementById('a-gstin')?.value||'').trim();
+  const gstin=(document.getElementById('a-gstin')?.value||'').trim().toUpperCase();
   const phone=(document.getElementById('a-phone')?.value||'').trim();
+  setAlert('auth-alert','');
+
   if(!shopName){setAlert('auth-alert','Shop name is required');return;}
   if(!email){setAlert('auth-alert','Email is required');return;}
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){setAlert('auth-alert','Please enter a valid email address');return;}
   if(!pass||pass.length<6){setAlert('auth-alert','Password must be at least 6 characters');return;}
+  if(gstin && gstin.length!==15){setAlert('auth-alert','GSTIN must be exactly 15 characters');return;}
+
   const btn=document.getElementById('auth-btn');
-  btn.disabled=true;btn.innerHTML='<span class="loader"></span> Creating Account...';
-  const {data,error}=await sb.auth.signUp({
-    email,password:pass,
-    options:{data:{shop_name:shopName,gstin,phone}}
-  });
-  if(error){
-    setAlert('auth-alert',error.message.includes('already registered')?'This Email is already registered — Please Login':error.message);
-    btn.disabled=false;btn.textContent='Create Account →';return;
+  btn.disabled=true;
+  btn.innerHTML='<span class="loader"></span> Creating Account...';
+
+  try{
+    const {data,error}=await sb.auth.signUp({
+      email, password:pass,
+      options:{
+        data:{shop_name:shopName, gstin, phone},
+        emailRedirectTo: window.location.origin + window.location.pathname
+      }
+    });
+
+    if(error){
+      btn.disabled=false; btn.textContent='Create Account →';
+      const msg = error.message?.toLowerCase()||'';
+      if(msg.includes('already registered') || msg.includes('user already exists') || msg.includes('already been registered')){
+        setAlert('auth-alert','⚠️ This email is already registered. <span style="cursor:pointer;color:var(--acc);text-decoration:underline" onclick="renderAuth(\'login\')">Login instead →</span>');
+      } else if(msg.includes('rate limit') || msg.includes('too many')){
+        setAlert('auth-alert','⏳ Too many signup attempts. Please wait a few minutes.');
+      } else if(msg.includes('invalid email')){
+        setAlert('auth-alert','❌ Invalid email address format.');
+      } else if(msg.includes('password') && msg.includes('weak')){
+        setAlert('auth-alert','❌ Password is too weak. Use a stronger password with letters and numbers.');
+      } else {
+        setAlert('auth-alert','❌ '+error.message);
+      }
+      return;
+    }
+
+    // Check if user was created and session exists (email confirmation disabled)
+    if(data.user && data.session){
+      // Email confirmation is OFF — user is directly logged in
+      currentUser=data.user;
+      localStorage.setItem('sb-session',JSON.stringify(data.session));
+      await createShopInDB(shopName,gstin,phone,data.user.id);
+      await loadShopForUser();
+      return;
+    }
+
+    // Email confirmation is ON
+    if(data.user && !data.session){
+      setAlert('auth-alert',`
+        <div style="line-height:1.7">
+          ✅ <b>Account created!</b><br>
+          A confirmation email has been sent to <b>${email}</b><br>
+          <small style="color:var(--t2)">
+            1. Check your inbox (and spam/junk folder)<br>
+            2. Click the confirmation link in the email<br>
+            3. Come back here and Login
+          </small><br>
+          <hr style="border:none;border-top:1px solid var(--bdr);margin:.5rem 0">
+          Didn't receive it?
+          <button class="btn bts btp" style="margin-top:4px" onclick="resendConfirmation('${email}')">
+            📧 Resend Email
+          </button>
+        </div>
+      `,'ok');
+      btn.disabled=false; btn.textContent='Create Account →';
+      return;
+    }
+
+    // Fallback
+    setAlert('auth-alert','Something unexpected happened. Please try again.','warn');
+    btn.disabled=false; btn.textContent='Create Account →';
+
+  } catch(e){
+    btn.disabled=false; btn.textContent='Create Account →';
+    setAlert('auth-alert','📡 Connection failed. Check internet and try again.<br><small>'+e.message+'</small>');
   }
-  if(data.user&&!data.session){
-    setAlert('auth-alert','✓ Confirmation email sent! Check your email and login after clicking the link.','ok');
-    btn.disabled=false;btn.textContent='Create Account →';return;
-  }
-  currentUser=data.user;
-  await createShopInDB(shopName,gstin,phone,data.user.id);
-  await loadShopForUser();
 }
 
 async function doGoogleLogin(){
-  const {error}=await sb.auth.signInWithOAuth({
-    provider:'google',
-    options:{redirectTo:window.location.href}
-  });
-  if(error)setAlert('auth-alert','Google login error: '+error.message);
+  try{
+    const {error}=await sb.auth.signInWithOAuth({
+      provider:'google',
+      options:{redirectTo: window.location.origin + window.location.pathname}
+    });
+    if(error) setAlert('auth-alert','Google login error: '+error.message);
+  }catch(e){
+    setAlert('auth-alert','📡 Connection failed: '+e.message);
+  }
 }
 
 async function doForgot(){
   const email=document.getElementById('a-email').value.trim();
-  if(!email){setAlert('auth-alert','Please enter Email');return;}
-  const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:window.location.href});
-  if(error){setAlert('auth-alert',error.message);return;}
-  setAlert('auth-alert','✓ Reset link sent! Check your email.','ok');
+  if(!email){setAlert('auth-alert','Please enter your Email');return;}
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){setAlert('auth-alert','Please enter a valid email');return;}
+  const btn=document.querySelector('#root button.btp');
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="loader"></span> Sending...';}
+  try{
+    const {error}=await sb.auth.resetPasswordForEmail(email,{
+      redirectTo: window.location.origin + window.location.pathname
+    });
+    if(btn){btn.disabled=false;btn.textContent='Send Reset Link';}
+    if(error){setAlert('auth-alert','❌ '+error.message);return;}
+    setAlert('auth-alert',`
+      ✅ Reset link sent to <b>${email}</b><br>
+      <small>Check inbox and spam folder. Click the link in the email to set a new password.</small>
+    `,'ok');
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent='Send Reset Link';}
+    setAlert('auth-alert','📡 Connection failed: '+e.message);
+  }
+}
+
+async function resendConfirmation(email){
+  if(!email){
+    email=document.getElementById('a-email')?.value?.trim();
+    if(!email){setAlert('auth-alert','Please enter your email first');return;}
+  }
+  try{
+    const {error}=await sb.auth.resend({type:'signup', email,
+      options:{emailRedirectTo: window.location.origin + window.location.pathname}
+    });
+    if(error) setAlert('auth-alert','❌ '+error.message);
+    else setAlert('auth-alert','✅ Confirmation email resent to '+email+'. Check inbox & spam.','ok');
+  }catch(e){
+    setAlert('auth-alert','📡 '+e.message);
+  }
 }
 
 async function doLogout(){
