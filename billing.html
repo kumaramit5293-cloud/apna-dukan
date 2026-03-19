@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="My Shop">
 <link rel="manifest" href="/apna-dukan/manifest.json">
 <title>My Shop — GST Billing App</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -382,7 +382,34 @@ let sb, currentUser=null, currentShop=null, activeTab='dashboard';
 let D={products:[],customers:[],bills:[],billItems:[],udhar:[],settings:{}};
 let syncOk=false, _authHandled=false;
 
-sb = window.supabase.createClient(SB_URL, SB_KEY);
+// Wait for Supabase to be ready
+function initApp() {
+  if (typeof window.supabase === 'undefined') {
+    setTimeout(initApp, 50);
+    return;
+  }
+  sb = window.supabase.createClient(SB_URL, SB_KEY);
+
+  // ── LISTEN AUTH CHANGES (Google OAuth redirect) ──
+  sb.auth.onAuthStateChange(async(event,session)=>{
+    if(event==='SIGNED_IN' && session && !currentUser && !_authHandled){
+      _authHandled = true;
+      currentUser=session.user;
+      await loadShopForUser();
+    }
+    if(event==='TOKEN_REFRESHED' && session && currentUser){
+      return;
+    }
+    if(event==='SIGNED_OUT'){
+      currentUser=null;
+      _authHandled=false;
+      renderAuth('login');
+    }
+  });
+
+  renderRoot();
+}
+// sb initialized via initApp()
 
 // ── UTILS ──
 const fmt=n=>'₹'+parseFloat(n||0).toFixed(2);
@@ -1720,27 +1747,9 @@ function expBills(){dlCSV(csv(['Bill No','Date','Customer','GSTIN','Taxable','CG
 function expGST(){const sel=document.getElementById('rep-m')?.value;const fl=sel?D.bills.filter(b=>{const d=new Date(b.date);return(d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0'))===sel}):D.bills;dlCSV(csv(['Invoice No','Invoice Date','Customer Name','Customer GSTIN','Taxable Value','CGST Amount','SGST Amount','Total GST','Invoice Total'],fl.map(b=>[billNo(b.id),new Date(b.date).toLocaleDateString('en-IN'),b.customer,b.custGstin||'',fmtN(b.subtotal),fmtN(b.gstTotal/2),fmtN(b.gstTotal/2),fmtN(b.gstTotal),fmtN(b.grand)])),'GSTR1_'+( sel||'all')+'.csv')}
 function expBill(id){const b=D.bills.find(x=>x.id===id);if(!b)return;dlCSV(csv(['#','Product','HSN','Qty','Rate','GST%','GST Amount','Total'],(b.items||[]).map((item,i)=>[i+1,item.name,item.hsn||'',item.qty,fmtN(item.rate),item.gst+'%',fmtN(item.gstAmt),fmtN(item.total)])),'Bill_'+billNo(id)+'.csv')}
 
-// ── LISTEN AUTH CHANGES (Google OAuth redirect के बाद) ──
-// Flag to prevent double-loading when renderRoot and onAuthStateChange both fire
-sb.auth.onAuthStateChange(async(event,session)=>{
-  if(event==='SIGNED_IN' && session && !currentUser && !_authHandled){
-    // Only handle if renderRoot hasn't already handled it
-    _authHandled = true;
-    currentUser=session.user;
-    await loadShopForUser();
-  }
-  if(event==='TOKEN_REFRESHED' && session && currentUser){
-    // Silent refresh — no reload needed
-    return;
-  }
-  if(event==='SIGNED_OUT'){
-    currentUser=null;
-    _authHandled=false;
-    renderAuth('login');
-  }
-});
 
-renderRoot();
+
+initApp();
 </script>
 </body>
 </html>
