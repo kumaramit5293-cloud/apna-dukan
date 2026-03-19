@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="My Shop">
-<link rel="manifest" href="/apna-dukan/manifest.json">
+<link rel="manifest" href="manifest.json">
 <title>My Shop — GST Billing App</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
 <style>
@@ -293,7 +293,7 @@ input.total-inp:focus{background:var(--accl)}
 <body>
 <div id="bill-print-area"></div>
 <div id="offline-banner">📵 No Internet — Working in Offline mode</div>
-<div id="root"></div>
+<div id="root"><div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:14px;font-family:-apple-system,sans-serif"><div style="width:32px;height:32px;border:3px solid #e5e7eb;border-top-color:#1a56db;border-radius:50%;animation:spin .7s linear infinite"></div><div style="font-size:13px;color:#6b7280">Loading app...</div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style></div>
 <div id="toast"></div>
 <div id="modal-root"></div>
 <div id="scanner-root"></div>
@@ -320,9 +320,14 @@ const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 
 // ── SERVICE WORKER — sw.js (GitHub Pages) ──
 if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('/apna-dukan/sw.js',{scope:'/apna-dukan/'})
-    .then(()=>console.log('SW: ok'))
-    .catch(()=>{}); // silently skip if sw.js not found
+  // Use relative path so it works on any GitHub Pages URL
+  var swPath = (function(){
+    var s = window.location.pathname;
+    return s.substring(0, s.lastIndexOf('/')+1) + 'sw.js';
+  })();
+  navigator.serviceWorker.register(swPath)
+    .then(function(){ console.log('SW: registered'); })
+    .catch(function(e){ console.log('SW: skipped', e.message); });
 }
 
 // ── OFFLINE DETECTION ──
@@ -383,8 +388,29 @@ let D={products:[],customers:[],bills:[],billItems:[],udhar:[],settings:{}};
 let syncOk=false, _authHandled=false;
 
 // ── SUPABASE INIT ──
+var _initAttempts = 0;
 function initApp() {
+  _initAttempts++;
+
   if (typeof window.supabase === 'undefined') {
+    // Timeout after 10 seconds — CDN may be blocked or slow
+    if (_initAttempts > 200) {
+      document.getElementById('root').innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:1.5rem;font-family:-apple-system,sans-serif">
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:2rem;max-width:400px;width:100%;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.07)">
+        <div style="font-size:48px;margin-bottom:1rem">⚠️</div>
+        <h2 style="font-size:17px;margin-bottom:.5rem;color:#111827">Script Load Failed</h2>
+        <p style="font-size:13px;color:#6b7280;line-height:1.7;margin-bottom:1.25rem">
+          The Supabase library could not be loaded.<br>
+          This usually happens due to:<br>
+          <b>• Ad blocker / firewall blocking CDN</b><br>
+          <b>• Slow / no internet connection</b>
+        </p>
+        <button onclick="location.reload()" style="background:#1a56db;color:#fff;border:none;padding:10px 20px;border-radius:9px;font-size:13px;cursor:pointer;width:100%;margin-bottom:8px">🔄 Reload Page</button>
+        <p style="font-size:11px;color:#9ca3af;margin-top:.5rem">Try disabling ad blocker if issue persists</p>
+      </div></div>`;
+      return;
+    }
     setTimeout(initApp, 50);
     return;
   }
