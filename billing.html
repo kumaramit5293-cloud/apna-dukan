@@ -1105,7 +1105,7 @@ function renderBilling(){
       </div>
       <div class="fg"><label>Date</label><input type="date" id="bdate" value="${today}"></div>
       <div class="fg"><label>Payment</label>
-        <select id="bpay"><option>Cash</option><option>UPI</option><option>Credit/Udhar</option><option>Credit Card</option><option>Cheque</option></select>
+        <select id="bpay"><option>Cash</option><option>UPI</option><option>Credit/Udhar</option><option>Credit Card</option><option>Cheque</option><option>Other</option></select>
       </div>
     </div>
     <div class="fg"><label>Customer</label>
@@ -1866,7 +1866,7 @@ function editBill(id){
   <div class="g2">
     <div class="fg"><label>Customer</label><input id="eb-cust" value="${b.customer}"></div>
     <div class="fg"><label>Payment</label>
-      <select id="eb-pay"><option${b.payment==='Cash'?' selected':''}>Cash</option><option${b.payment==='UPI'?' selected':''}>UPI</option><option${b.payment==='Credit/Udhar'?' selected':''}>Credit/Udhar</option><option${b.payment==='Credit Card'?' selected':''}>Credit Card</option><option${b.payment==='Cheque'?' selected':''}>Cheque</option></select>
+      <select id="eb-pay"><option${b.payment==='Cash'?' selected':''}>Cash</option><option${b.payment==='UPI'?' selected':''}>UPI</option><option${b.payment==='Credit/Udhar'?' selected':''}>Credit/Udhar</option><option${b.payment==='Credit Card'?' selected':''}>Credit Card</option><option${b.payment==='Cheque'?' selected':''}>Cheque</option><option${b.payment==='Other'?' selected':''}>Other</option></select>
     </div>
   </div>
   <div class="fg"><label>Date</label><input type="date" id="eb-date" value="${new Date(b.date).toISOString().split('T')[0]}"></div>
