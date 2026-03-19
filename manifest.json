@@ -1,7 +1,7 @@
 {
-  "name": "अपना दुकान",
-  "short_name": "दुकान",
-  "description": "GST बिलिंग ऐप — Windows & Android",
+  "name": "My Shop — GST Billing",
+  "short_name": "My Shop",
+  "description": "GST Billing App — Windows & Android",
   "start_url": "/apna-dukan/",
   "scope": "/apna-dukan/",
   "display": "standalone",
