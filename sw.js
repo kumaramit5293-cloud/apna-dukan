@@ -1,55 +1,49 @@
-// अपना दुकान — Service Worker v4
-const CACHE = 'apna-dukan-v4';
-const APP = '/apna-dukan/';
+// My Shop - Service Worker v5
+var CACHE = 'my-shop-v5';
+var APP = '/apna-dukan/';
 
-self.addEventListener('install', e => {
-  self.skipWaiting();
-  e.waitUntil(// My Shop — Service Worker v5
-const CACHE = 'my-shop-v5';
-const APP = '/apna-dukan/';
-
-self.addEventListener('install', e => {
+self.addEventListener('install', function(e) {
   self.skipWaiting();
   e.waitUntil(
-    caches.open(CACHE).then(c => c.add(APP)).catch(() => {})
+    caches.open(CACHE).then(function(c){ return c.add(APP); }).catch(function(){})
   );
 });
 
-self.addEventListener('activate', e => {
+self.addEventListener('activate', function(e) {
   e.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(
-        keys.filter(k => k !== CACHE).map(k => caches.delete(k))
-      ))
-      .then(() => self.clients.claim())
+    caches.keys().then(function(keys) {
+      return Promise.all(
+        keys.filter(function(k){ return k !== CACHE; }).map(function(k){ return caches.delete(k); })
+      );
+    }).then(function(){ return self.clients.claim(); })
   );
 });
 
-self.addEventListener('fetch', e => {
+self.addEventListener('fetch', function(e) {
   if (e.request.method !== 'GET') return;
-  const url = new URL(e.request.url);
+  var url = new URL(e.request.url);
 
-  // Supabase — always network only, never cache auth/data calls
-  if (url.hostname.includes('supabase.co')) {
+  // Supabase - network only, never cache
+  if (url.hostname.indexOf('supabase.co') !== -1) {
     e.respondWith(
-      fetch(e.request).catch(() =>
-        new Response(JSON.stringify({ error: 'offline' }), {
+      fetch(e.request).catch(function() {
+        return new Response(JSON.stringify({ error: 'offline' }), {
           status: 503,
           headers: { 'Content-Type': 'application/json' }
-        })
-      )
+        });
+      })
     );
     return;
   }
 
-  // CDN assets (Supabase JS, etc.) — cache first
-  if (url.hostname.includes('jsdelivr.net') || url.hostname.includes('cdnjs.cloudflare.com')) {
+  // CDN assets - cache first
+  if (url.hostname.indexOf('jsdelivr.net') !== -1 || url.hostname.indexOf('cdnjs.cloudflare.com') !== -1) {
     e.respondWith(
-      caches.match(e.request).then(cached => {
+      caches.match(e.request).then(function(cached) {
         if (cached) return cached;
-        return fetch(e.request).then(r => {
-          const toCache = r.clone();
-          caches.open(CACHE).then(c => c.put(e.request, toCache));
+        return fetch(e.request).then(function(r) {
+          var toCache = r.clone();
+          caches.open(CACHE).then(function(c){ c.put(e.request, toCache); });
           return r;
         });
       })
@@ -57,79 +51,17 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // App shell — cache first, update in background (stale-while-revalidate)
-  if (url.pathname.startsWith(APP)) {
+  // App shell - cache first, update in background
+  if (url.pathname.indexOf(APP) === 0) {
     e.respondWith(
-      caches.match(e.request).then(cached => {
-        const network = fetch(e.request).then(r => {
+      caches.match(e.request).then(function(cached) {
+        var network = fetch(e.request).then(function(r) {
           if (r.ok) {
-            const toCache = r.clone();
-            caches.open(CACHE).then(c => c.put(e.request, toCache));
+            var toCache = r.clone();
+            caches.open(CACHE).then(function(c){ c.put(e.request, toCache); });
           }
           return r;
-        }).catch(() => null);
-        return cached || network;
-      })
-    );
-  }
-});
-    caches.open(CACHE).then(c => c.add(APP)).catch(() => {})
-  );
-});
-
-self.addEventListener('activate', e => {
-  e.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
-      .then(() => self.clients.claim())
-  );
-});
-
-self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
-  const url = new URL(e.request.url);
-
-  // Supabase — network only, no cache
-  if (url.hostname.includes('supabase.co')) {
-    e.respondWith(
-      fetch(e.request).catch(() =>
-        new Response(JSON.stringify({ error: 'offline' }), {
-          status: 503,
-          headers: { 'Content-Type': 'application/json' }
-        })
-      )
-    );
-    return;
-  }
-
-  // CDN assets — cache first, no clone bug
-  if (url.hostname.includes('jsdelivr.net') || url.hostname.includes('cdnjs.cloudflare.com')) {
-    e.respondWith(
-      caches.match(e.request).then(cached => {
-        if (cached) return cached;
-        return fetch(e.request).then(r => {
-          // FIX: clone BEFORE reading, store clone in cache
-          const toCache = r.clone();
-          caches.open(CACHE).then(c => c.put(e.request, toCache));
-          return r;
-        });
-      })
-    );
-    return;
-  }
-
-  // App shell — cache first, update in background
-  if (url.pathname.startsWith(APP)) {
-    e.respondWith(
-      caches.match(e.request).then(cached => {
-        // FIX: fetch first, clone for cache, return original
-        const network = fetch(e.request).then(r => {
-          if (r.ok) {
-            const toCache = r.clone(); // clone BEFORE returning r
-            caches.open(CACHE).then(c => c.put(e.request, toCache));
-          }
-          return r;
-        }).catch(() => null);
+        }).catch(function(){ return null; });
         return cached || network;
       })
     );
