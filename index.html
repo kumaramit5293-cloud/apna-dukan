@@ -453,8 +453,8 @@ async function doSetNewPassword(){
 const fmt=n=>'₹'+parseFloat(n||0).toFixed(2);
 const fmtN=n=>parseFloat(n||0).toFixed(2);
 const billNo=n=>{const pfx=(D.settings.billPrefix||'').trim();return pfx?(pfx+'-'+n):String(n)};
-function saveLocal(){if(currentShop?.id)localStorage.setItem('ld_'+currentShop.id,JSON.stringify({...D,billItems:D.billItems||[]}))}
-function loadLocal(){if(!currentShop?.id)return;const raw=localStorage.getItem('ld_'+currentShop.id);if(raw){try{const p=JSON.parse(raw);D={...p,billItems:p.billItems||[],udhar:p.udhar||[]}}catch(e){console.warn('loadLocal parse error',e)}}}
+function saveLocal(){if(currentShop)localStorage.setItem('ld_'+currentShop,JSON.stringify({...D,billItems:D.billItems||[]}))}
+function loadLocal(){const d=localStorage.getItem('ld_'+currentShop);if(d){const p=JSON.parse(d);D={...p,billItems:p.billItems||[],udhar:p.udhar||[]}}}
 function closeModal(){document.getElementById('modal-root').innerHTML=''}
 function toast(msg,type='ok'){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';t.style.color=type==='err'?'var(--err-t)':type==='warn'?'var(--warn-t)':'var(--ok-t)';clearTimeout(t._to);t._to=setTimeout(()=>t.style.display='none',3500)}
 function updSync(ok){syncOk=ok;const el=document.getElementById('sync-dot');if(el){el.className='sync-badge '+(ok?'sync-ok':'sync-off');el.textContent=ok?'● Cloud Sync On':'● Offline Mode'}}
@@ -462,45 +462,39 @@ function setAlert(id,msg,type='err'){const el=document.getElementById(id);if(el)
 
 // ── INIT ──
 async function renderRoot(){
-  // Show loading spinner
   document.getElementById('root').innerHTML=`
   <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px">
     <div class="loader" style="width:32px;height:32px;border-width:3px"></div>
-    <div id="load-msg" style="font-size:13px;color:var(--t2)">Connecting to server...</div>
+    <div id="load-msg" style="font-size:13px;color:var(--t2)">Opening app...</div>
   </div>`;
-
   const setMsg = m => { const e=document.getElementById('load-msg'); if(e) e.textContent=m; };
 
-  // ── STEP 1: Check if Supabase project is reachable ──
-  try {
-    setMsg('Checking server connection...');
-    const pingRes = await Promise.race([
-      fetch(SB_URL+'/rest/v1/', {
-        headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer '+SB_KEY }
-      }),
-      new Promise((_,r)=>setTimeout(()=>r(new Error('timeout')),8000))
-    ]);
-
-    if(!pingRes.ok && pingRes.status !== 401 && pingRes.status !== 400) {
-      // Project might be paused
-      showConnectionError(pingRes.status);
-      return;
-    }
-  } catch(pingErr) {
-    if(pingErr.message==='timeout' || pingErr.message?.includes('fetch')) {
-      showConnectionError('network');
-      return;
-    }
+  // ── STEP 1: Cached session se turant load karo (no network wait) ──
+  const cached = localStorage.getItem('sb-session');
+  if(cached){
+    try{
+      const parsed = JSON.parse(cached);
+      if(parsed?.user && parsed?.access_token){
+        // App immediately load karo — network verify background me
+        currentUser = parsed.user;
+        _authHandled = true;
+        await loadShopForUser();
+        // Background me token refresh karo silently
+        _bgRefreshSession(parsed.refresh_token);
+        return;
+      }
+    }catch(e){ localStorage.removeItem('sb-session'); }
   }
 
-  // ── STEP 2: Check existing session ──
+  // ── STEP 2: Koi cached session nahi — server se check karo ──
+  setMsg('Checking connection...');
   try {
-    setMsg('Checking login status...');
-    const sessionPromise = sb.auth.getSession();
-    const timeoutPromise = new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),10000));
-    const result = await Promise.race([sessionPromise, timeoutPromise]);
+    // Supabase getSession() — 6 second hard timeout
+    const result = await Promise.race([
+      sb.auth.getSession(),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),6000))
+    ]);
     const session = result?.data?.session;
-
     if(session){
       _authHandled = true;
       currentUser = session.user;
@@ -508,45 +502,42 @@ async function renderRoot(){
       await loadShopForUser();
       return;
     }
-
-    // No active session — try cached
-    const cached = localStorage.getItem('sb-session');
-    if(cached){
-      try{
-        const parsed = JSON.parse(cached);
-        if(parsed?.access_token && parsed?.user){
-          // Try refreshing
-          const {data:refreshed, error:re} = await sb.auth.refreshSession({refresh_token: parsed.refresh_token});
-          if(!re && refreshed?.session){
-            currentUser = refreshed.session.user;
-            _authHandled = true;
-            localStorage.setItem('sb-session', JSON.stringify(refreshed.session));
-            await loadShopForUser();
-            return;
-          }
-        }
-      }catch(e2){ localStorage.removeItem('sb-session'); }
-    }
-
-    renderAuth('login');
-
   } catch(e){
-    console.log('renderRoot error:', e.message);
-    // Offline — try cached session
-    const cached = localStorage.getItem('sb-session');
-    if(cached){
-      try{
-        const parsed = JSON.parse(cached);
-        if(parsed?.user){
-          currentUser = parsed.user;
-          _authHandled = true;
-          await loadShopForUser();
-          return;
-        }
-      }catch(e2){}
+    console.log('getSession error:', e.message);
+    // Network problem — ping to check if paused or offline
+    try{
+      const pingRes = await Promise.race([
+        fetch(SB_URL+'/rest/v1/',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}}),
+        new Promise((_,r)=>setTimeout(()=>r(new Error('timeout')),5000))
+      ]);
+      if(!pingRes.ok && pingRes.status!==401 && pingRes.status!==400){
+        showConnectionError(pingRes.status); return;
+      }
+    }catch(pe){
+      showConnectionError('network'); return;
     }
-    renderAuth('login');
   }
+
+  renderAuth('login');
+}
+
+// Background me silently token refresh karo — app block nahi hogi
+async function _bgRefreshSession(refreshToken){
+  if(!refreshToken) return;
+  try{
+    const {data, error} = await Promise.race([
+      sb.auth.refreshSession({refresh_token: refreshToken}),
+      new Promise((_,r)=>setTimeout(()=>r({data:null,error:{message:'timeout'}}),8000))
+    ]);
+    if(!error && data?.session){
+      localStorage.setItem('sb-session', JSON.stringify(data.session));
+      console.log('Session refreshed in background');
+    } else if(error && error.message !== 'timeout'){
+      // Refresh token expired — clear it, user will need to re-login next time
+      console.log('Refresh token expired, cleared');
+      localStorage.removeItem('sb-session');
+    }
+  }catch(e){ console.log('bg refresh error:', e.message); }
 }
 
 function showConnectionError(status){
@@ -961,7 +952,7 @@ async function syncAll(){
       sb.from('bills').select('*').eq('shop_id',currentShop.id).order('date',{ascending:false}),
       sb.from('shops').select('settings').eq('id',currentShop.id).single()
     ]);
-    if(pr.error){console.error('syncAll products error:',pr.error);throw pr.error;}
+    if(pr.error)throw pr.error;
     D.products=(pr.data||[]).map(p=>({id:p.id,name:p.name,barcode:p.barcode,hsn:p.hsn,gst:p.gst,buyPrice:p.buy_price,sellPrice:p.sell_price,stock:p.stock,minStock:p.min_stock,unit:p.unit}));
     D.customers=(cu.data||[]).map(c=>({id:c.id,name:c.name,phone:c.phone,gstin:c.gstin,address:c.address,totalPurchase:c.total_purchase,udhar:c.udhar||0}));
     D.bills=(bi.data||[]).map(b=>({id:b.id,date:b.date,customer:b.customer,custId:b.cust_id,custGstin:b.cust_gstin,custAddr:b.cust_addr,items:b.items,subtotal:b.subtotal,gstTotal:b.gst_total,grand:b.grand,payment:b.payment}));
@@ -1594,50 +1585,14 @@ function invRows(f=''){
 }
 function filterInv(v){const t=document.getElementById('inv-tb');if(t)t.innerHTML=invRows(v)}
 async function addProd(){
-  const n=document.getElementById('pn').value.trim();
-  if(!n){alert('Name is required');return}
-  const p={
-    id:Date.now(),
-    name:n,
-    barcode:(document.getElementById('pbar').value||'').trim(),
-    hsn:(document.getElementById('ph').value||'').trim(),
-    gst:+(document.getElementById('pg').value||0),
-    buyPrice:+(document.getElementById('pb').value||0),
-    sellPrice:+(document.getElementById('ps').value||0),
-    stock:+(document.getElementById('pst').value||0),
-    minStock:+(document.getElementById('pm').value||5),
-    unit:document.getElementById('pu').value||'Pcs'
-  };
-  if(!currentShop?.id){toast('Not logged in — saved locally only','warn');D.products.push(p);saveLocal();renderInv();return;}
-  D.products.push(p);
-  saveLocal();
-  try{
-    const {error}=await sb.from('products').upsert({
-      id:p.id,
-      shop_id:currentShop.id,
-      name:p.name,
-      barcode:p.barcode,
-      hsn:p.hsn,
-      gst:p.gst,
-      buy_price:p.buyPrice,
-      sell_price:p.sellPrice,
-      stock:p.stock,
-      min_stock:p.minStock,
-      unit:p.unit
-    });
-    if(error){
-      console.error('addProd Supabase error:',error);
-      toast('⚠️ Supabase error: '+error.message,'warn');
-    } else {
-      toast('Product saved ✓');
-    }
-  }catch(e){
-    console.error('addProd network error:',e);
-    toast('Saved locally — sync failed: '+e.message,'warn');
-  }
+  const n=document.getElementById('pn').value.trim();if(!n){alert('Name is required');return}
+  const p={id:Date.now(),name:n,barcode:document.getElementById('pbar').value,hsn:document.getElementById('ph').value,gst:document.getElementById('pg').value,buyPrice:document.getElementById('pb').value||0,sellPrice:document.getElementById('ps').value||0,stock:+document.getElementById('pst').value||0,minStock:+document.getElementById('pm').value||5,unit:document.getElementById('pu').value};
+  D.products.push(p);saveLocal();
+  try{await sb.from('products').upsert({id:p.id,shop_id:currentShop.id,name:p.name,barcode:p.barcode,hsn:p.hsn,gst:p.gst,buy_price:p.buyPrice,sell_price:p.sellPrice,stock:p.stock,min_stock:p.minStock,unit:p.unit});toast('Product saved ✓')}
+  catch(e){toast('Saved locally','warn')}
   renderInv();
 }
-async function delProd(id){if(!confirm('Delete this product?'))return;D.products=D.products.filter(p=>p.id!==id);saveLocal();try{const {error}=await sb.from('products').delete().eq('id',id);if(error)console.error('delProd:',error);}catch(e){console.error('delProd:',e);}renderInv()}
+async function delProd(id){if(!confirm('Delete this product?'))return;D.products=D.products.filter(p=>p.id!==id);saveLocal();try{await sb.from('products').delete().eq('id',id)}catch(e){}renderInv()}
 
 // ── CUSTOMERS ──
 function renderCust(){
