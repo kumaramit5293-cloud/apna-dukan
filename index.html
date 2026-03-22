@@ -317,8 +317,10 @@ const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 // ============================================================
 
 // ── ADMIN: अपनी email यहाँ डालें ──
-const ADMIN_EMAIL = 'kumaramit5293@gmail.com'; // ← यहाँ अपनी email
-const TRIAL_DAYS = 30; // Free trial days
+const ADMIN_EMAIL  = 'kumaramit5293@gmail.com'; // ← Admin email
+const TRIAL_DAYS   = 30;                           // Free trial days
+const PAYMENT_UPI  = 'kumaramit5293@upi';          // ← UPI ID for QR
+const CONTACT_PHONE= '9876543210';                  // ← WhatsApp number
 
 // ── PWA MANIFEST — manifest.json file se load hota hai ──
 
@@ -2029,27 +2031,95 @@ function expBill(id){const b=D.bills.find(x=>x.id===id);if(!b)return;dlCSV(csv([
 
 // ── TRIAL SYSTEM ──
 function checkTrialStatus(){
-  if(currentUser?.email===ADMIN_EMAIL)return; // Admin को trial नहीं
+  if(currentUser?.email===ADMIN_EMAIL)return;
+
+  // Block check
+  if(D.settings?.blocked){
+    showBlockedModal();
+    return;
+  }
+
   const createdAt=currentUser?.created_at||currentUser?.user_metadata?.created_at;
   if(!createdAt)return;
   const daysSince=Math.floor((Date.now()-new Date(createdAt).getTime())/(1000*60*60*24));
   D.trialDaysLeft=Math.max(0,TRIAL_DAYS-daysSince);
   D.trialExpired=daysSince>TRIAL_DAYS;
-  // Show trial banner
-  const banner=document.getElementById('trial-banner');
-  if(banner){
-    if(D.trialExpired){
-      banner.style.display='block';
-      banner.style.background='#991b1b';
-      banner.innerHTML='⚠️ Your free trial has expired. Please contact us to continue: <b>'+ADMIN_EMAIL+'</b>';
-    } else if(D.trialDaysLeft<=7){
-      banner.style.display='block';
-      banner.style.background='#92400e';
-      banner.innerHTML='⏳ Trial expires in <b>'+D.trialDaysLeft+' days</b>. Contact us to subscribe: <b>'+ADMIN_EMAIL+'</b>';
-    } else {
-      banner.style.display='none';
+
+  if(D.trialExpired){
+    showTrialExpiredModal();
+  } else {
+    // Warning banner in last 7 days
+    const banner=document.getElementById('trial-banner');
+    if(banner){
+      if(D.trialDaysLeft<=7){
+        banner.style.display='block';
+        banner.innerHTML='⏳ Trial expires in <b>'+D.trialDaysLeft+' days</b>. Pay to continue — Contact: <a href="https://wa.me/91'+CONTACT_PHONE+'" target="_blank" style="color:#fef3c7;text-decoration:underline">WhatsApp '+CONTACT_PHONE+'</a>';
+      } else {
+        banner.style.display='none';
+      }
     }
   }
+}
+
+function showTrialExpiredModal(){
+  // UPI QR via api.qrserver.com
+  const upiLink='upi://pay?pa='+PAYMENT_UPI+'&pn=Apna+Dukan&cu=INR';
+  const qrUrl='https://api.qrserver.com/v1/create-qr-code/?size=200x200&data='+encodeURIComponent(upiLink);
+  const waMsg=encodeURIComponent('Hello, I have paid for Apna Dukan subscription. Please activate my account.\nEmail: '+currentUser.email);
+
+  const mr=document.getElementById('modal-root');
+  mr.innerHTML=`
+<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.75);z-index:9000;display:flex;align-items:center;justify-content:center;padding:1rem">
+<div style="background:var(--bg1);border-radius:20px;padding:2rem;width:100%;max-width:420px;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.3)">
+  <div style="font-size:40px;margin-bottom:.5rem">⏰</div>
+  <h2 style="font-size:18px;font-weight:700;margin-bottom:.375rem">Free Trial Expired</h2>
+  <p style="font-size:13px;color:var(--t2);margin-bottom:1.25rem">Your 30-day free trial has ended.<br>Pay to continue using Apna Dukan.</p>
+
+  <div style="background:var(--bg2);border-radius:12px;padding:1rem;margin-bottom:1rem">
+    <p style="font-size:12px;font-weight:600;margin-bottom:.625rem;color:var(--t2)">Scan to Pay via UPI</p>
+    <img src="${qrUrl}" alt="UPI QR Code" style="width:180px;height:180px;border-radius:8px;border:2px solid var(--bdr)">
+    <p style="font-size:13px;font-weight:700;margin-top:.5rem;color:var(--acc)">${PAYMENT_UPI}</p>
+  </div>
+
+  <div style="background:var(--info-bg);border-radius:10px;padding:.875rem;margin-bottom:1rem;font-size:13px;color:var(--info-t);line-height:1.6">
+    <p style="font-weight:600;margin-bottom:.25rem">After Payment:</p>
+    <p>Send payment screenshot on WhatsApp to</p>
+    <p style="font-size:16px;font-weight:700">${CONTACT_PHONE}</p>
+    <p style="font-size:11px;margin-top:.25rem">Your account will be activated within 24 hours</p>
+  </div>
+
+  <a href="https://wa.me/91${CONTACT_PHONE}?text=${waMsg}" target="_blank" style="text-decoration:none;display:block">
+    <button style="width:100%;background:#25d366;color:#fff;border:none;padding:12px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:.75rem">
+      📲 Send Receipt on WhatsApp
+    </button>
+  </a>
+
+  <button onclick="doLogout()" style="width:100%;background:var(--bg2);color:var(--t2);border:1px solid var(--bdr);padding:10px;border-radius:10px;font-size:13px;cursor:pointer">
+    ↩ Logout
+  </button>
+</div>
+</div>`;
+}
+
+function showBlockedModal(){
+  const waMsg=encodeURIComponent('Hello, my account has been blocked. Please help.\nEmail: '+currentUser.email);
+  const mr=document.getElementById('modal-root');
+  mr.innerHTML=`
+<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.75);z-index:9000;display:flex;align-items:center;justify-content:center;padding:1rem">
+<div style="background:var(--bg1);border-radius:20px;padding:2rem;width:100%;max-width:380px;text-align:center">
+  <div style="font-size:40px;margin-bottom:.5rem">🚫</div>
+  <h2 style="font-size:18px;font-weight:700;margin-bottom:.375rem">Account Blocked</h2>
+  <p style="font-size:13px;color:var(--t2);margin-bottom:1.25rem">Your account has been blocked by admin.<br>Please contact us to resolve this.</p>
+  <a href="https://wa.me/91${CONTACT_PHONE}?text=${waMsg}" target="_blank" style="text-decoration:none;display:block">
+    <button style="width:100%;background:#25d366;color:#fff;border:none;padding:12px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:.75rem">
+      📲 Contact on WhatsApp
+    </button>
+  </a>
+  <button onclick="doLogout()" style="width:100%;background:var(--bg2);color:var(--t2);border:1px solid var(--bdr);padding:10px;border-radius:10px;font-size:13px;cursor:pointer">
+    ↩ Logout
+  </button>
+</div>
+</div>`;
 }
 
 // ── PURCHASE ENTRY ──
@@ -2218,42 +2288,61 @@ async function openAdmin(){
 
 async function renderAdmin(){
   const el=document.getElementById('tab-admin');if(!el)return;
-  el.innerHTML=`<div style="text-align:center;padding:2rem"><div class="loader"></div><p style="margin-top:1rem;color:var(--t2)">Loading admin data...</p></div>`;
+  el.innerHTML='<div style="text-align:center;padding:2rem"><div class="loader"></div><p style="margin-top:1rem;color:var(--t2)">Loading admin data...</p></div>';
   try{
     const {data:shops}=await sb.from('shops').select('id,name,gstin,owner_id,settings,created_at').order('created_at',{ascending:false});
-    // Get bill counts per shop
     const {data:billCounts}=await sb.from('bills').select('shop_id').limit(5000);
     const countMap={};
     (billCounts||[]).forEach(b=>{countMap[b.shop_id]=(countMap[b.shop_id]||0)+1;});
     const now=Date.now();
-    el.innerHTML=`
-<div class="g4" style="margin-bottom:1.25rem">
-  <div class="sc"><div class="lbl">Total Shops</div><div class="val">${(shops||[]).length}</div></div>
-  <div class="sc"><div class="lbl">Active (30d)</div><div class="val" style="color:var(--ok-t)">${(shops||[]).filter(s=>s.created_at&&(now-new Date(s.created_at).getTime())<30*864e5||(countMap[s.id]||0)>0).length}</div></div>
-  <div class="sc"><div class="lbl">Total Bills</div><div class="val">${(billCounts||[]).length}</div></div>
-  <div class="sc"><div class="lbl">You are</div><div class="val" style="font-size:13px">Admin</div></div>
-</div>
-<div class="card">
-  <div class="ct">All Registered Shops</div>
-  <div style="overflow-x:auto">
-  <table><thead><tr><th>Shop Name</th><th>Owner Email</th><th>GSTIN</th><th>Bills</th><th>Joined</th><th>Trial</th></tr></thead>
-  <tbody>${(shops||[]).map(s=>{
-    const joinedDays=s.created_at?Math.floor((now-new Date(s.created_at).getTime())/(864e5)):0;
-    const trialLeft=Math.max(0,TRIAL_DAYS-joinedDays);
-    const trialExpired=joinedDays>TRIAL_DAYS;
-    const bills=countMap[s.id]||0;
-    return '<tr>'
-      +'<td><b>'+( s.name||'-')+'</b></td>'
-      +'<td style="font-size:11px">'+(s.settings?.phone||'-')+'</td>'
-      +'<td style="font-size:11px">'+(s.gstin||'-')+'</td>'
-      +'<td><span class="bdg '+(bills>0?'bg':'by')+'">'+bills+'</span></td>'
-      +'<td style="font-size:11px">'+(s.created_at?new Date(s.created_at).toLocaleDateString('en-IN'):'-')+'</td>'
-      +'<td>'+(trialExpired?'<span class="bdg br">Expired</span>':'<span class="bdg bg">'+trialLeft+'d left</span>')+'</td>'
-      +'</tr>';
-  }).join('')}</tbody></table></div>
-</div>`;
+    const total=shops?.length||0;
+    const active=(shops||[]).filter(s=>(countMap[s.id]||0)>0).length;
+    const blocked=(shops||[]).filter(s=>s.settings?.blocked).length;
+    el.innerHTML='<div class="g4" style="margin-bottom:1.25rem">'
+      +'<div class="sc"><div class="lbl">Total Shops</div><div class="val">'+total+'</div></div>'
+      +'<div class="sc"><div class="lbl">Active</div><div class="val" style="color:var(--ok-t)">'+active+'</div></div>'
+      +'<div class="sc"><div class="lbl">Blocked</div><div class="val" style="color:var(--err-t)">'+blocked+'</div></div>'
+      +'<div class="sc"><div class="lbl">Total Bills</div><div class="val">'+(billCounts?.length||0)+'</div></div>'
+      +'</div>'
+      +'<div class="card"><div class="ct">All Registered Shops</div><div style="overflow-x:auto">'
+      +'<table><thead><tr><th>Shop</th><th>Contact</th><th>Bills</th><th>Joined</th><th>Trial</th><th>Status</th><th>Action</th></tr></thead><tbody>'
+      +(shops||[]).map(s=>{
+        const joinedDays=s.created_at?Math.floor((now-new Date(s.created_at).getTime())/(864e5)):0;
+        const trialLeft=Math.max(0,TRIAL_DAYS-joinedDays);
+        const trialExpired=joinedDays>TRIAL_DAYS;
+        const isBlocked=s.settings?.blocked||false;
+        const bills=countMap[s.id]||0;
+        const phone=s.settings?.phone||'';
+        return '<tr>'
+          +'<td><b>'+(s.name||'-')+'</b><br><small style="color:var(--t2)">'+(s.gstin||'No GSTIN')+'</small></td>'
+          +'<td style="font-size:11px">'+(phone?'<a href="https://wa.me/91'+phone+'" target="_blank" style="color:var(--acc)">📲 '+phone+'</a>':'-')+'</td>'
+          +'<td><span class="bdg '+(bills>0?'bg':'by')+'">'+bills+'</span></td>'
+          +'<td style="font-size:11px">'+(s.created_at?new Date(s.created_at).toLocaleDateString('en-IN'):'-')+'</td>'
+          +'<td>'+(trialExpired?'<span class="bdg br">Expired</span>':'<span class="bdg bg">'+trialLeft+'d left</span>')+'</td>'
+          +'<td>'+(isBlocked?'<span class="bdg br">Blocked</span>':'<span class="bdg bg">Active</span>')+'</td>'
+          +'<td><button class="btn bts '+(isBlocked?'btp':'btd')+'" onclick="adminToggleBlock(this)" data-sid="'+s.id+'" data-blocked="'+isBlocked+'">'+(isBlocked?'✓ Unblock':'⊘ Block')+'</button></td>'
+          +'</tr>';
+      }).join('')
+      +'</tbody></table></div></div>';
   }catch(e){
-    el.innerHTML='<div class="card"><p style="color:var(--err-t)">Error loading admin data: '+e.message+'</p></div>';
+    el.innerHTML='<div class="card"><p style="color:var(--err-t)">Error: '+e.message+'<br><small>Make sure you have admin access to all shops in Supabase.</small></p></div>';
+  }
+}
+
+async function adminToggleBlock(btn){
+  const shopId=btn.dataset.sid;
+  const currentlyBlocked=btn.dataset.blocked==='true';
+  const action=currentlyBlocked?'unblock':'block';
+  if(!confirm('Are you sure you want to '+action+' this shop?'))return;
+  try{
+    const {data:shop}=await sb.from('shops').select('settings').eq('id',shopId).single();
+    const newSettings={...(shop.settings||{}),blocked:!currentlyBlocked};
+    const {error}=await sb.from('shops').update({settings:newSettings}).eq('id',shopId);
+    if(error)throw error;
+    toast((currentlyBlocked?'Shop unblocked ✓':'Shop blocked ✓'));
+    renderAdmin();
+  }catch(e){
+    toast('Error: '+e.message,'err');
   }
 }
 
