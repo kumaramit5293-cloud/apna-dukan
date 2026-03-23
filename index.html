@@ -318,7 +318,7 @@ const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 
 // ── ADMIN: अपनी email यहाँ डालें ──
 const ADMIN_EMAIL  = 'kumar.amit5293@gmail.com'; // ← Admin email
-const TRIAL_DAYS   = 30;                           // Free trial days
+const TRIAL_DAYS   = 15;                           // Free trial days
 const PAYMENT_UPI  = 'kumaramit5293@upi';          // ← UPI ID for QR
 const CONTACT_PHONE= '9122785333';                  // ← WhatsApp number
 
@@ -772,9 +772,29 @@ async function doSignup(){
 
   const btn=document.getElementById('auth-btn');
   btn.disabled=true;
-  btn.innerHTML='<span class="loader"></span> Creating Account...';
+  btn.innerHTML='<span class="loader"></span> Checking...';
 
   try{
+    // Check duplicate shop name or GSTIN
+    const dupQuery=await sb.from('shops').select('id,name,gstin').limit(500);
+    if(dupQuery.data){
+      const existing=dupQuery.data;
+      const nameDup=existing.find(s=>s.name&&s.name.toLowerCase()===shopName.toLowerCase());
+      const gstinDup=gstin&&existing.find(s=>s.gstin&&s.gstin.toUpperCase()===gstin.toUpperCase());
+      const waLink='https://wa.me/91'+CONTACT_PHONE+'?text='+encodeURIComponent('Hello, I want to register my shop: '+shopName+(gstin?' (GSTIN: '+gstin+')':''));
+      if(nameDup){
+        btn.disabled=false;btn.textContent='Create Account →';
+        setAlert('auth-alert','⚠️ A shop with this name is already registered.<br><a href="'+waLink+'" target="_blank" style="color:var(--acc)">📲 Contact Admin on WhatsApp ('+CONTACT_PHONE+')</a>');
+        return;
+      }
+      if(gstinDup){
+        btn.disabled=false;btn.textContent='Create Account →';
+        setAlert('auth-alert','⚠️ This GSTIN is already registered.<br><a href="'+waLink+'" target="_blank" style="color:var(--acc)">📲 Contact Admin on WhatsApp ('+CONTACT_PHONE+')</a>');
+        return;
+      }
+    }
+
+    btn.innerHTML='<span class="loader"></span> Creating Account...';
     const {data,error}=await sb.auth.signUp({
       email, password:pass,
       options:{
@@ -961,7 +981,11 @@ async function syncAll(){
       sb.from('purchases').select('*').eq('shop_id',currentShop.id).order('date',{ascending:false}).limit(200)
     ]);
     if(pr.error)throw pr.error;
-    D.products=(pr.data||[]).map(p=>({id:p.id,name:p.name,barcode:p.barcode,hsn:p.hsn,gst:p.gst,buyPrice:p.buy_price,sellPrice:p.sell_price,stock:p.stock,minStock:p.min_stock,unit:p.unit}));
+    D.products=(pr.data||[]).map(p=>({
+      id:p.id,name:p.name,barcode:p.barcode||'',hsn:p.hsn||'',
+      gst:+p.gst||0,buyPrice:+p.buy_price||0,sellPrice:+p.sell_price||0,
+      stock:+p.stock||0,minStock:+p.min_stock||0,unit:p.unit||'Pcs'
+    }));
     D.customers=(cu.data||[]).map(c=>({id:c.id,name:c.name,phone:c.phone,gstin:c.gstin,address:c.address,totalPurchase:c.total_purchase,udhar:c.udhar||0}));
     D.bills=(bi.data||[]).map(b=>({id:b.id,date:b.date,customer:b.customer,custId:b.cust_id,custGstin:b.cust_gstin,custAddr:b.cust_addr,items:b.items,subtotal:b.subtotal,gstTotal:b.gst_total,grand:b.grand,payment:b.payment}));
     D.purchases=!pu.error?(pu.data||[]).map(p=>({id:p.id,date:p.date,supplier:p.supplier,items:p.items,total:p.total,notes:p.notes})):[];
@@ -1195,11 +1219,18 @@ function prodAC(v){
   const drop=document.getElementById('ac-drop');if(!drop)return;
   acIdx=-1;
   if(!v||v.length<1){drop.style.display='none';return}
-  const list=D.products.filter(p=>p.name.toLowerCase().includes(v.toLowerCase())).slice(0,8);
+  const list=D.products.filter(p=>
+    p.name.toLowerCase().includes(v.toLowerCase())||
+    (p.barcode&&p.barcode.includes(v))
+  ).slice(0,10);
   if(!list.length){drop.style.display='none';return}
   drop.style.display='block';
   drop.innerHTML=list.map((p,i)=>`<div class="ac-item" data-idx="${i}" onclick="pickProd(${p.id})">
-    <b>${p.name}</b><small>${fmt(p.sellPrice)} | GST:${p.gst}% | Stock:${p.stock}${p.unit}</small>
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <b>${p.name}</b>
+      <span style="font-size:11px;color:var(--acc);font-weight:600">${fmt(p.sellPrice)}</span>
+    </div>
+    <small style="color:var(--t2)">GST: ${p.gst}% ${p.hsn?'| HSN: '+p.hsn:''} ${+p.minStock>0?'| Stock: '+p.stock+' '+p.unit:''}</small>
   </div>`).join('');
 }
 function pickProd(id){
@@ -1264,7 +1295,11 @@ function addItem(){
     D.products.push(np);pId=np.id;
     D._autoAddedPIds=D._autoAddedPIds||new Set();
     D._autoAddedPIds.add(np.id);
-    sb.from('products').upsert({id:np.id,shop_id:currentShop.id,name:np.name,barcode:'',hsn:np.hsn,gst:np.gst,buy_price:0,sell_price:np.sellPrice,stock:0,min_stock:0,unit:'Pcs'}).catch(()=>{});
+    saveLocal(); // Save to local immediately so it persists
+    // Save to Supabase
+    sb.from('products').insert({id:np.id,shop_id:currentShop.id,name:np.name,barcode:'',hsn:np.hsn,gst:np.gst,buy_price:0,sell_price:np.sellPrice,stock:0,min_stock:0,unit:'Pcs'})
+      .then(({error})=>{if(error)sb.from('products').upsert({id:np.id,shop_id:currentShop.id,name:np.name,barcode:'',hsn:np.hsn,gst:np.gst,buy_price:0,sell_price:np.sellPrice,stock:0,min_stock:0,unit:'Pcs'}).catch(()=>{});})
+      .catch(()=>{});
   }
   // टोटल column दिया हो तो: taxable=floor, gst=floor, total=base+gstAmt ≤ totInp
   let base, gstAmt, total;
@@ -1563,7 +1598,12 @@ function renderInv(){
   const el=document.getElementById('tab-inventory');if(!el)return;
   el.innerHTML=`<div class="card"><div class="ct">Add Product</div>
   <div class="g3">
-    <div class="fg"><label>Name *</label><input id="pn" placeholder="Product Name"></div>
+    <div class="fg"><label>Name *</label>
+      <div class="ac-wrap">
+        <input id="pn" placeholder="Product Name" oninput="invProdAC(this.value)" autocomplete="off">
+        <div class="ac-drop" id="inv-ac-drop" style="display:none"></div>
+      </div>
+    </div>
     <div class="fg"><label>Barcode / SKU</label><input id="pbar" placeholder="Scan or enter"></div>
     <div class="fg"><label>HSN Code</label><input id="ph" placeholder="Search by name..." oninput="hsnS(this.value,'hinv','ph','pg')"></div>
   </div>
@@ -1600,12 +1640,95 @@ function invRows(f=''){
     return`<tr><td><b>${p.name}</b></td><td style="font-size:11px;color:var(--t2)">${p.barcode||'-'}</td><td>${p.hsn||'-'}</td><td>${p.gst}%</td><td>${fmt(p.buyPrice)}</td><td>${fmt(p.sellPrice)}</td><td>${stockDisp}</td><td>${status}</td><td><button class="btn bts btd" onclick="delProd(${p.id})">✕</button></td></tr>`}).join('')
 }
 function filterInv(v){const t=document.getElementById('inv-tb');if(t)t.innerHTML=invRows(v)}
+
+function invProdAC(v){
+  const drop=document.getElementById('inv-ac-drop');if(!drop)return;
+  if(!v||v.length<1){drop.style.display='none';return}
+  const list=D.products.filter(p=>p.name.toLowerCase().includes(v.toLowerCase())).slice(0,6);
+  if(!list.length){drop.style.display='none';return}
+  drop.style.display='block';
+  drop.innerHTML=list.map(p=>`<div class="ac-item" onclick="fillInvForm('${p.name.replace(/'/g,"\'")}',${p.id})">
+    <b>${p.name}</b>
+    <small style="color:var(--t2)">Buy: ${fmt(p.buyPrice)} | Sell: ${fmt(p.sellPrice)} | Stock: ${p.stock}</small>
+  </div>`).join('');
+}
+
+function fillInvForm(name,id){
+  const p=D.products.find(x=>x.id===id);if(!p)return;
+  const pn=document.getElementById('pn');if(pn)pn.value=p.name;
+  const pbar=document.getElementById('pbar');if(pbar)pbar.value=p.barcode||'';
+  const ph=document.getElementById('ph');if(ph)ph.value=p.hsn||'';
+  const pg=document.getElementById('pg');if(pg)pg.value=p.gst||18;
+  const pb=document.getElementById('pb');if(pb)pb.value=p.buyPrice||'';
+  const ps=document.getElementById('ps');if(ps)ps.value=p.sellPrice||'';
+  const pst=document.getElementById('pst');if(pst)pst.value=p.stock||'';
+  const pm=document.getElementById('pm');if(pm)pm.value=p.minStock||'';
+  const pu=document.getElementById('pu');if(pu)pu.value=p.unit||'Pcs';
+  const drop=document.getElementById('inv-ac-drop');if(drop)drop.style.display='none';
+}
 async function addProd(){
-  const n=document.getElementById('pn').value.trim();if(!n){alert('Name is required');return}
-  const p={id:Date.now(),name:n,barcode:document.getElementById('pbar').value,hsn:document.getElementById('ph').value,gst:document.getElementById('pg').value,buyPrice:document.getElementById('pb').value||0,sellPrice:document.getElementById('ps').value||0,stock:+document.getElementById('pst').value||0,minStock:+document.getElementById('pm').value||5,unit:document.getElementById('pu').value};
-  D.products.push(p);saveLocal();
-  try{await sb.from('products').upsert({id:p.id,shop_id:currentShop.id,name:p.name,barcode:p.barcode,hsn:p.hsn,gst:p.gst,buy_price:p.buyPrice,sell_price:p.sellPrice,stock:p.stock,min_stock:p.minStock,unit:p.unit});toast('Product saved ✓')}
-  catch(e){toast('Saved locally','warn')}
+  const n=document.getElementById('pn').value.trim();
+  if(!n){alert('Name is required');return}
+  // Check duplicate name in inventory
+  if(D.products.find(x=>x.name.toLowerCase()===n.toLowerCase())){
+    if(!confirm('Product "'+n+'" already exists. Update it?'))return;
+    // Update existing
+    const existing=D.products.find(x=>x.name.toLowerCase()===n.toLowerCase());
+    existing.barcode=document.getElementById('pbar').value||existing.barcode;
+    existing.hsn=document.getElementById('ph').value||existing.hsn;
+    existing.gst=+document.getElementById('pg').value||existing.gst;
+    existing.buyPrice=+document.getElementById('pb').value||existing.buyPrice;
+    existing.sellPrice=+document.getElementById('ps').value||existing.sellPrice;
+    existing.stock=document.getElementById('pst').value!==''?+document.getElementById('pst').value:existing.stock;
+    existing.minStock=document.getElementById('pm').value!==''?+document.getElementById('pm').value:existing.minStock;
+    existing.unit=document.getElementById('pu').value||existing.unit;
+    saveLocal();
+    try{
+      await sb.from('products').update({
+        barcode:existing.barcode,hsn:existing.hsn,gst:existing.gst,
+        buy_price:existing.buyPrice,sell_price:existing.sellPrice,
+        stock:existing.stock,min_stock:existing.minStock,unit:existing.unit
+      }).eq('id',existing.id);
+      toast('Product updated ✓');
+    }catch(e){toast('Saved locally','warn')}
+    renderInv();
+    return;
+  }
+  const p={
+    id:Date.now(),
+    name:n,
+    barcode:document.getElementById('pbar').value.trim(),
+    hsn:document.getElementById('ph').value.trim(),
+    gst:+document.getElementById('pg').value||0,
+    buyPrice:+document.getElementById('pb').value||0,
+    sellPrice:+document.getElementById('ps').value||0,
+    stock:+document.getElementById('pst').value||0,
+    minStock:+document.getElementById('pm').value||0,
+    unit:document.getElementById('pu').value
+  };
+  D.products.push(p);
+  saveLocal();
+  try{
+    const {error}=await sb.from('products').insert({
+      id:p.id,shop_id:currentShop.id,
+      name:p.name,barcode:p.barcode,hsn:p.hsn,gst:p.gst,
+      buy_price:p.buyPrice,sell_price:p.sellPrice,
+      stock:p.stock,min_stock:p.minStock,unit:p.unit
+    });
+    if(error)throw error;
+    toast('Product added to inventory ✓');
+  }catch(e){
+    // Try upsert as fallback
+    await sb.from('products').upsert({
+      id:p.id,shop_id:currentShop.id,
+      name:p.name,barcode:p.barcode,hsn:p.hsn,gst:p.gst,
+      buy_price:p.buyPrice,sell_price:p.sellPrice,
+      stock:p.stock,min_stock:p.minStock,unit:p.unit
+    }).catch(()=>{});
+    toast('Product saved ✓');
+  }
+  // Clear form
+  ['pn','pbar','ph','pb','ps','pst','pm'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   renderInv();
 }
 async function delProd(id){if(!confirm('Delete this product?'))return;D.products=D.products.filter(p=>p.id!==id);saveLocal();try{await sb.from('products').delete().eq('id',id)}catch(e){}renderInv()}
