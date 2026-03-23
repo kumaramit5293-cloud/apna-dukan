@@ -2290,23 +2290,67 @@ async function renderAdmin(){
   const el=document.getElementById('tab-admin');if(!el)return;
   el.innerHTML='<div style="text-align:center;padding:2rem"><div class="loader"></div><p style="margin-top:1rem;color:var(--t2)">Loading admin data...</p></div>';
   try{
-    const {data:shops}=await sb.from('shops').select('id,name,gstin,owner_id,settings,created_at').order('created_at',{ascending:false});
-    const {data:billCounts}=await sb.from('bills').select('shop_id').limit(5000);
+    // Get current session token for auth
+    const {data:{session}}=await sb.auth.getSession();
+    if(!session){el.innerHTML='<div class="card"><p>Not logged in</p></div>';return;}
+    const token=session.access_token;
+
+    // Fetch all shops using REST API with auth header (bypasses RLS for own data)
+    // We use Supabase REST directly — RLS still applies but admin owns shops policy
+    // Solution: add admin policy in Supabase OR use a Supabase Function
+    // Quick workaround: fetch from Supabase with select that includes a filter
+    // that returns all if admin (we set this via Supabase policy)
+
+    // Try direct fetch — works if admin policy added in Supabase
+    const shopsRes=await fetch(SB_URL+'/rest/v1/shops?select=id,name,gstin,owner_id,settings,created_at&order=created_at.desc',{
+      headers:{
+        'apikey':SB_KEY,
+        'Authorization':'Bearer '+token,
+        'Content-Type':'application/json',
+        'Prefer':'return=representation'
+      }
+    });
+    const shops=await shopsRes.json();
+
+    // Fetch bill counts
+    const billRes=await fetch(SB_URL+'/rest/v1/bills?select=shop_id&limit=10000',{
+      headers:{'apikey':SB_KEY,'Authorization':'Bearer '+token}
+    });
+    const billData=await billRes.json();
     const countMap={};
-    (billCounts||[]).forEach(b=>{countMap[b.shop_id]=(countMap[b.shop_id]||0)+1;});
+    (Array.isArray(billData)?billData:[]).forEach(b=>{countMap[b.shop_id]=(countMap[b.shop_id]||0)+1;});
+
+    const shopList=Array.isArray(shops)?shops:[];
     const now=Date.now();
-    const total=shops?.length||0;
-    const active=(shops||[]).filter(s=>(countMap[s.id]||0)>0).length;
-    const blocked=(shops||[]).filter(s=>s.settings?.blocked).length;
+    const total=shopList.length;
+    const active=shopList.filter(s=>(countMap[s.id]||0)>0).length;
+    const blocked=shopList.filter(s=>s.settings?.blocked).length;
+
+    if(total===0){
+      el.innerHTML='<div class="card" style="text-align:center;padding:2rem">'
+        +'<p style="font-size:14px;font-weight:600;margin-bottom:.5rem">No shops found</p>'
+        +'<p style="font-size:12px;color:var(--t2)">Admin policy not set in Supabase yet.</p>'
+        +'<div style="background:var(--info-bg);color:var(--info-t);padding:1rem;border-radius:9px;margin-top:1rem;text-align:left;font-size:12px">'
+        +'<p style="font-weight:600;margin-bottom:.5rem">Supabase में यह SQL चलाएं:</p>'
+        +'<code style="font-size:11px;white-space:pre-wrap;display:block;background:var(--bg2);padding:.75rem;border-radius:6px">'
+        +'CREATE POLICY &quot;admin_all_shops&quot; ON shops\nFOR ALL USING (\n  auth.email() = &apos;'+ADMIN_EMAIL+'&apos;\n  OR auth.uid() = owner_id\n);\n\nCREATE POLICY &quot;admin_all_bills&quot; ON bills\nFOR SELECT USING (\n  auth.email() = &apos;'+ADMIN_EMAIL+'&apos;\n  OR shop_id IN (SELECT id FROM shops WHERE owner_id = auth.uid())\n);'
+        +'</code>'
+        +'<p style="margin-top:.75rem">SQL चलाने के बाद Admin Panel refresh करें।</p>'
+        +'</div>'
+        +'<button class="btn btp" style="margin-top:1rem" onclick="renderAdmin()">↻ Refresh</button>'
+        +'</div>';
+      return;
+    }
+
     el.innerHTML='<div class="g4" style="margin-bottom:1.25rem">'
       +'<div class="sc"><div class="lbl">Total Shops</div><div class="val">'+total+'</div></div>'
-      +'<div class="sc"><div class="lbl">Active</div><div class="val" style="color:var(--ok-t)">'+active+'</div></div>'
+      +'<div class="sc"><div class="lbl">Active (bills>0)</div><div class="val" style="color:var(--ok-t)">'+active+'</div></div>'
       +'<div class="sc"><div class="lbl">Blocked</div><div class="val" style="color:var(--err-t)">'+blocked+'</div></div>'
-      +'<div class="sc"><div class="lbl">Total Bills</div><div class="val">'+(billCounts?.length||0)+'</div></div>'
+      +'<div class="sc"><div class="lbl">Total Bills</div><div class="val">'+(Array.isArray(billData)?billData.length:0)+'</div></div>'
       +'</div>'
       +'<div class="card"><div class="ct">All Registered Shops</div><div style="overflow-x:auto">'
       +'<table><thead><tr><th>Shop</th><th>Contact</th><th>Bills</th><th>Joined</th><th>Trial</th><th>Status</th><th>Action</th></tr></thead><tbody>'
-      +(shops||[]).map(s=>{
+      +shopList.map(s=>{
         const joinedDays=s.created_at?Math.floor((now-new Date(s.created_at).getTime())/(864e5)):0;
         const trialLeft=Math.max(0,TRIAL_DAYS-joinedDays);
         const trialExpired=joinedDays>TRIAL_DAYS;
@@ -2325,7 +2369,8 @@ async function renderAdmin(){
       }).join('')
       +'</tbody></table></div></div>';
   }catch(e){
-    el.innerHTML='<div class="card"><p style="color:var(--err-t)">Error: '+e.message+'<br><small>Make sure you have admin access to all shops in Supabase.</small></p></div>';
+    el.innerHTML='<div class="card"><p style="color:var(--err-t)">Error: '+e.message+'</p>'
+      +'<button class="btn btp" style="margin-top:1rem" onclick="renderAdmin()">↻ Retry</button></div>';
   }
 }
 
