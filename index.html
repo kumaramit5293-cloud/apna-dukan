@@ -1023,6 +1023,7 @@ function renderApp(){
   </div>
   <div class="content">
     ${tabs.map(t=>`<div id="tab-${t}" class="tab${activeTab===t?' on':''}"></div>`).join('')}
+    <div id="tab-admin" class="tab"></div>
   </div>
 </div>
 </div>
@@ -1045,9 +1046,14 @@ function renderApp(){
 
 function sw(id){
   activeTab=id;
-  const L={dashboard:'Dashboard',billing:'Create GST Bill',udhar:'Ledger / Dues',inventory:'Inventory',customers:'Customers',bills:'Bill History',reports:'Reports',settings:'Settings'};
+  const L={dashboard:'Dashboard',billing:'Create GST Bill',udhar:'Ledger / Dues',purchase:'Purchase Entry',inventory:'Inventory',customers:'Customers',bills:'Bill History',reports:'Reports',settings:'Settings',admin:'👑 Admin Panel'};
   const el=document.getElementById('ptitle');if(el)el.textContent=L[id];
-  document.querySelectorAll('.nav').forEach((n,i)=>n.classList.toggle('on',['dashboard','billing','udhar','purchase','inventory','customers','bills','reports','settings'][i]===id));
+  // Fix: match by onclick attribute, not index (admin nav shifts indices)
+  document.querySelectorAll('.nav').forEach(n=>{
+    const oc=n.getAttribute('onclick')||'';
+    const isActive=oc.includes("sw('"+id+"')") || (id==='admin'&&oc.includes('openAdmin'));
+    n.classList.toggle('on',isActive);
+  });
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
   const tab=document.getElementById('tab-'+id);if(tab)tab.classList.add('on');
   // Update bottom nav active state
@@ -2283,7 +2289,18 @@ function expPurchases(){
 // ── ADMIN PANEL ──
 async function openAdmin(){
   if(currentUser?.email!==ADMIN_EMAIL){toast('Access denied','err');return;}
-  sw('admin');
+  activeTab='admin';
+  const el=document.getElementById('ptitle');if(el)el.textContent='👑 Admin Panel';
+  // Clear all tabs
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  const tab=document.getElementById('tab-admin');if(tab)tab.classList.add('on');
+  // Update nav active state
+  document.querySelectorAll('.nav').forEach(n=>{
+    const oc=n.getAttribute('onclick')||'';
+    n.classList.toggle('on',oc.includes('openAdmin'));
+  });
+  renderAdmin();
+  const content=document.querySelector('.content');if(content)content.scrollTop=0;
 }
 
 async function renderAdmin(){
