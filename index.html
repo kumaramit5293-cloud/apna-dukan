@@ -461,6 +461,59 @@ const fmtN=n=>parseFloat(n||0).toFixed(2);
 const billNo=n=>{const pfx=(D.settings.billPrefix||'').trim();return pfx?(pfx+'-'+n):String(n)};
 function saveLocal(){if(currentShop)localStorage.setItem('ld_'+currentShop,JSON.stringify({...D,billItems:D.billItems||[]}))}
 function loadLocal(){const d=localStorage.getItem('ld_'+currentShop);if(d){const p=JSON.parse(d);D={...p,billItems:p.billItems||[],udhar:p.udhar||[],purchases:p.purchases||[]}}}
+function openCustStmt(custId){
+  const cust=D.customers.find(x=>x.id===+custId);if(!cust)return;
+  const bills=D.bills.filter(b=>b.custId&&+b.custId===+custId);
+  const totalBilled=bills.reduce((s,b)=>s+b.grand,0);
+  const outstanding=+(cust.udhar)||0;
+  const paid=totalBilled-outstanding;
+  const rows=bills.map(b=>{
+    const d=new Date(b.date).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+    const credit=b.payment==='Credit/Udhar'||b.payment==='उधार';
+    return '<tr>'
+      +'<td style="padding:5px 8px;border-bottom:1px solid var(--bdr)">'+d+'</td>'
+      +'<td style="padding:5px 8px;border-bottom:1px solid var(--bdr);font-weight:600">'+billNo(b.id)+'</td>'
+      +'<td style="padding:5px 8px;border-bottom:1px solid var(--bdr);text-align:right;color:var(--err-t);font-weight:600">'+fmt(b.grand)+'</td>'
+      +'<td style="padding:5px 8px;border-bottom:1px solid var(--bdr);text-align:center">'
+      +(credit?'<span style="background:var(--warn-bg);color:var(--warn-t);padding:1px 7px;border-radius:20px;font-size:11px">Credit</span>'
+             :'<span style="background:var(--ok-bg);color:var(--ok-t);padding:1px 7px;border-radius:20px;font-size:11px">'+b.payment+'</span>')
+      +'</td></tr>';
+  }).join('');
+  const waMsg=encodeURIComponent('Dear '+cust.name+',\n\nAccount Statement — '+D.settings.shopName+'\n\nTotal Billed : \u20b9'+fmtN(totalBilled)+'\nAmount Paid  : \u20b9'+fmtN(paid)+'\nOutstanding  : \u20b9'+fmtN(outstanding)+'\n\n'+(outstanding>0?'Kindly clear your dues.':'Your account is clear. Thank you!'));
+  document.getElementById('modal-root').innerHTML=`
+<div class="modal-wrap" onclick="if(event.target===this)closeModal()">
+<div class="modal-box" style="max-width:520px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+    <h3 style="font-size:15px;font-weight:700">📋 Account Statement</h3>
+    <button class="btn bts btd" onclick="closeModal()">✕</button>
+  </div>
+  <div style="background:var(--bg2);border-radius:10px;padding:.875rem 1rem;margin-bottom:.875rem">
+    <div style="font-weight:700;font-size:15px">${cust.name}</div>
+    <div style="font-size:12px;color:var(--t2);margin-top:2px">${cust.phone||''}${cust.gstin?' | '+cust.gstin:''}</div>
+  </div>
+  <div class="g3" style="margin-bottom:.875rem">
+    <div class="sc"><div class="lbl">Total Billed</div><div class="val" style="font-size:16px">${fmt(totalBilled)}</div></div>
+    <div class="sc"><div class="lbl">Paid</div><div class="val" style="font-size:16px;color:var(--ok-t)">${fmt(paid)}</div></div>
+    <div class="sc"><div class="lbl">Outstanding</div><div class="val" style="font-size:16px;color:var(--err-t)">${fmt(outstanding)}</div></div>
+  </div>
+  <div style="max-height:260px;overflow-y:auto;border:1px solid var(--bdr);border-radius:9px;margin-bottom:.875rem">
+    <table style="width:100%;font-size:12px;border-collapse:collapse">
+      <thead><tr style="background:var(--bg2)">
+        <th style="padding:6px 8px;text-align:left">Date</th>
+        <th style="padding:6px 8px;text-align:left">Invoice</th>
+        <th style="padding:6px 8px;text-align:right">Amount</th>
+        <th style="padding:6px 8px;text-align:center">Payment</th>
+      </tr></thead>
+      <tbody>${rows||'<tr><td colspan="4" style="text-align:center;padding:1rem;color:var(--t2)">No bills found</td></tr>'}</tbody>
+    </table>
+  </div>
+  <div class="fr" style="justify-content:flex-end;gap:8px;flex-wrap:wrap">
+    ${cust.phone?'<a href="https://wa.me/91'+cust.phone+'?text='+waMsg+'" target="_blank" style="text-decoration:none"><button class="btn btg bts">📲 WhatsApp</button></a>':''}
+    ${outstanding>0?'<button class="btn btp bts" onclick="closeModal();setTimeout(()=>openUdharPayModal('+cust.id+'),100)">💰 Collect</button>':''}
+  </div>
+</div></div>`;
+}
+
 function closeModal(){document.getElementById('modal-root').innerHTML=''}
 function toast(msg,type='ok'){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';t.style.color=type==='err'?'var(--err-t)':type==='warn'?'var(--warn-t)':'var(--ok-t)';clearTimeout(t._to);t._to=setTimeout(()=>t.style.display='none',3500)}
 function updSync(ok){syncOk=ok;const el=document.getElementById('sync-dot');if(el){el.className='sync-badge '+(ok?'sync-ok':'sync-off');el.textContent=ok?'● Cloud Sync On':'● Offline Mode'}}
@@ -1113,7 +1166,7 @@ function renderDash(){
     </table></div>
   <div class="card"><div class="ct" style="display:flex;justify-content:space-between">Outstanding Dues <button class="btn bts btp" onclick="sw('udhar')">View All →</button></div>
     <table><thead><tr><th>Customer</th><th>Amount Due</th><th></th></tr></thead>
-    <tbody>${D.customers.filter(c=>+c.udhar>0).sort((a,b)=>b.udhar-a.udhar).slice(0,5).map(c=>`<tr><td>${c.name}</td><td><span class="udhar-amt">${fmt(c.udhar)}</span></td><td><button class="btn bts btp" onclick="openUdharPayModal(${c.id})">Collect</button></td></tr>`).join('')||'<tr><td colspan="3" style="text-align:center;padding:1rem;color:var(--t2)">No dues pending ✓</td></tr>'}</tbody>
+    <tbody>${D.customers.filter(c=>+c.udhar>0).sort((a,b)=>b.udhar-a.udhar).slice(0,5).map(c=>`<tr><td>${c.name}</td><td><span class="udhar-amt">${fmt(c.udhar)}</span></td><td style="white-space:nowrap"><button class="btn bts" onclick="openCustStmt(${c.id})" title="Statement">📋</button> <button class="btn bts btp" onclick="openUdharPayModal(${c.id})">Collect</button></td></tr>`).join('')||'<tr><td colspan="3" style="text-align:center;padding:1rem;color:var(--t2)">No dues pending ✓</td></tr>'}</tbody>
     </table></div>
 </div>`;
 }
@@ -1190,7 +1243,20 @@ function renderBilling(){
       <div class="r"><span>SGST</span><span id="tsg">₹0.00</span></div>
       <div class="r"><span>Total (before rounding)</span><span id="tgrand_before">₹0.00</span></div>
       <div class="r" id="tro-row" style="display:none;color:var(--t2)"><span>Round Off</span><span id="tro-amt">0.00</span></div>
-      <div class="g" style="color:var(--acc);margin-top:6px;font-size:16px"><span>Total Payable</span><span id="t-payable">₹0</span></div>
+    </div>
+    <div style="background:var(--bg2);border-radius:9px;padding:.75rem 1rem;margin-top:.5rem">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:.5rem">
+        <label style="font-size:12px;color:var(--t2);white-space:nowrap;min-width:60px">Discount</label>
+        <input type="number" id="disc-val" placeholder="0" value="0" min="0" oninput="calcDiscount()" style="width:80px;flex-shrink:0">
+        <select id="disc-type" onchange="calcDiscount()" style="width:60px;font-size:12px;padding:6px 4px;flex-shrink:0">
+          <option value="pct">%</option>
+          <option value="flat">₹</option>
+        </select>
+        <span style="font-size:12px;color:var(--ok-t);font-weight:600;flex:1;text-align:right" id="disc-show"></span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:16px;font-weight:700;border-top:1px solid var(--bdr);padding-top:6px">
+        <span>Total Payable</span><span id="t-payable" style="color:var(--acc)">₹0</span>
+      </div>
     </div>
     <div class="fr" style="margin-top:1rem">
       <button class="btn btp" onclick="genBill()">✓ Generate Bill</button>
@@ -1340,9 +1406,27 @@ function renderBillItems(){
   if(roEl)roEl.style.display=roundOff!==0?'flex':'none';
   const roAmt=document.getElementById('tro-amt');
   if(roAmt)roAmt.textContent=(roundOff>0?'+':'')+fmtN(roundOff);
-  set('t-payable','₹'+totalPayable);
+  calcDiscount();
   // Live preview update
   updateLivePreview();
+}
+
+function calcDiscount(){
+  const items=D.billItems||[];
+  const subtotal=items.reduce((s,i)=>s+i.total,0);
+  const discVal=+document.getElementById('disc-val')?.value||0;
+  const discType=document.getElementById('disc-type')?.value||'pct';
+  let discAmt=0;
+  if(discVal>0){
+    if(discType==='pct') discAmt=parseFloat((subtotal*discVal/100).toFixed(2));
+    else discAmt=Math.min(parseFloat(discVal.toFixed(2)),subtotal);
+  }
+  const payable=Math.round(subtotal-discAmt);
+  const ds=document.getElementById('disc-show');
+  if(ds)ds.textContent=discAmt>0?'- '+fmt(discAmt):'';
+  const tp=document.getElementById('t-payable');
+  if(tp)tp.textContent='₹'+payable;
+  D._discAmt=discAmt; D._discVal=discVal; D._discType=discType;
 }
 
 function editItem(i){
@@ -1449,12 +1533,15 @@ async function genBill(){
   if(!items.length){alert('Please add items first');return}
   const billId=+document.getElementById('bnum').value;
   const billDate=new Date(document.getElementById('bdate').value).toISOString();
-  const sub=items.reduce((s,i)=>s+i.base,0),gt=items.reduce((s,i)=>s+i.gstAmt,0),grand=sub+gt;
+  const sub=items.reduce((s,i)=>s+i.base,0),gt=items.reduce((s,i)=>s+i.gstAmt,0);
+  const rawGrand=sub+gt;
+  const discAmt=D._discAmt||0;
+  const grand=parseFloat((rawGrand-discAmt).toFixed(2));
   const cId=document.getElementById('bcust').value;
   const cust=cId?D.customers.find(c=>c.id===+cId):null;
   const payment=document.getElementById('bpay').value;
   const isUdhar=payment==='Credit/Udhar';
-  const bill={id:billId,date:billDate,customer:cust?cust.name:'Walk-In',custId:cId||null,custGstin:cust?.gstin||'',custAddr:cust?.address||'',items:[...items],subtotal:sub,gstTotal:gt,grand,payment};
+  const bill={id:billId,date:billDate,customer:cust?cust.name:'Walk-In',custId:cId||null,custGstin:cust?.gstin||'',custAddr:cust?.address||'',items:[...items],subtotal:sub,gstTotal:gt,grand,discAmt,discVal:D._discVal||0,discType:D._discType||'pct',payment};
   D.bills.unshift(bill);D.settings.nextBill=billId+1;
   if(cust){cust.totalPurchase=(cust.totalPurchase||0)+grand;if(isUdhar)cust.udhar=(+cust.udhar||0)+grand;}
   items.filter(i=>i.pId).forEach(({pId,qty})=>{const p=D.products.find(x=>x.id===pId);if(p&&+p.stock>0)p.stock=Math.max(0,+p.stock-qty)});
@@ -1466,20 +1553,25 @@ async function genBill(){
     for(const {pId,qty} of items.filter(i=>i.pId)){const p=D.products.find(x=>x.id===pId);if(p&&+p.stock>0)await sb.from('products').update({stock:p.stock}).eq('id',pId)}
     toast('Bill saved ✓');
   }catch(e){toast('Saved locally — sync pending','warn')}
-  D.billItems=[];renderBillItems();showPreview(bill);
+  D.billItems=[];D._discAmt=0;D._discVal=0;
+  const dv=document.getElementById('disc-val');if(dv)dv.value=0;
+  renderBillItems();showPreview(bill);
 }
 
 function showPreview(bill){
   const s=D.settings||{};
   const d=new Date(bill.date);
-  const ds=d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
+  const ds=d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
   const roundOff=Math.round(bill.grand)-bill.grand;
   const totalPayable=Math.round(bill.grand);
   const rows=bill.items.map((item,i)=>`<tr><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">${i+1}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">${item.name}${item.hsn?'<br><small style="color:#6b7280;font-size:10px">HSN: '+item.hsn+'</small>':''}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:center">${item.qty}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${fmtN(item.rate)}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:center">${item.gst}%</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${fmtN(item.gstAmt)}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:700">${fmtN(item.total)}</td></tr>`).join('');
   const bankHtml=(s.bankName||s.accountNo||s.upiId)?`<div style="margin-top:.875rem;padding:.75rem;border:1px solid #e5e7eb;border-radius:9px;font-size:11px"><p style="font-weight:700;margin-bottom:6px">💳 Payment Details</p><table style="font-size:11px;width:100%;border-collapse:collapse">${s.accountHolder?'<tr><td style="padding:2px 0;color:#6b7280">A/C Holder</td><td style="padding:2px 8px">:</td><td style="font-weight:600">'+s.accountHolder+'</td></tr>':''}${s.bankName?'<tr><td style="padding:2px 0;color:#6b7280">Bank</td><td style="padding:2px 8px">:</td><td>'+s.bankName+'</td></tr>':''}${s.accountNo?'<tr><td style="padding:2px 0;color:#6b7280">A/C No</td><td style="padding:2px 8px">:</td><td>'+s.accountNo+'</td></tr>':''}${s.ifsc?'<tr><td style="padding:2px 0;color:#6b7280">IFSC</td><td style="padding:2px 8px">:</td><td>'+s.ifsc+'</td></tr>':''}${s.upiId?'<tr><td style="padding:2px 0;color:#6b7280">UPI</td><td style="padding:2px 8px">:</td><td style="font-weight:700">'+s.upiId+'</td></tr>':''}</table></div>`:'';
 
+  const logoHtml=s.logoImg?('<img src="'+s.logoImg+'" style="height:60px;object-fit:contain;display:block;margin:0 auto 8px" alt="logo">'):'';
+  const footerHtml=(s.footerMsg||s.termsMsg)?('<div style="margin-top:.875rem;padding:.625rem .75rem;background:#f9fafb;border-radius:8px;font-size:11px;color:#6b7280">'+(s.footerMsg?'<p>'+s.footerMsg+'</p>':'')+(s.termsMsg?'<p style=\'margin-top:2px;font-style:italic\'>'+s.termsMsg+'</p>':'')+'</div>'):'';
   const billHtml=`<div class="bprev" id="bill-content-inner">
   <div class="bph">
+    ${logoHtml}
     <h2>${s.shopName||'Shop'}</h2>
     <p>${s.address||''}</p>
     <p>GSTIN: ${s.gstin||'N/A'}${s.phone?' | Ph: '+s.phone:''}</p>
@@ -1492,7 +1584,10 @@ function showPreview(bill){
   <table style="width:100%;font-size:12px;border-collapse:collapse">
     <thead><tr style="background:#f3f4f6"><th style="padding:6px 8px;text-align:left">#</th><th style="padding:6px 8px;text-align:left">Description</th><th style="padding:6px 8px;text-align:center">Qty</th><th style="padding:6px 8px;text-align:right">Rate</th><th style="padding:6px 8px;text-align:center">GST%</th><th style="padding:6px 8px;text-align:right">GST Amt</th><th style="padding:6px 8px;text-align:right">Amount</th></tr></thead>
     <tbody>${rows}</tbody>
-    <tfoot><tr><td colspan="6" style="padding:6px 8px;text-align:right;font-weight:700;border-top:2px solid #111">Grand Total</td><td style="padding:6px 8px;text-align:right;font-weight:700;border-top:2px solid #111">₹${fmtN(bill.grand)}</td></tr></tfoot>
+    <tfoot>
+      ${(bill.discAmt&&bill.discAmt>0)?('<tr><td colspan="6" style="padding:4px 8px;text-align:right;color:#6b7280">Subtotal</td><td style="padding:4px 8px;text-align:right;color:#6b7280">₹'+fmtN(bill.grand+bill.discAmt)+'</td></tr>'+'<tr><td colspan="6" style="padding:4px 8px;text-align:right;color:#059669">Discount ('+(bill.discType==='pct'?bill.discVal+'%':'₹'+bill.discVal)+')</td><td style="padding:4px 8px;text-align:right;color:#059669;font-weight:600">- ₹'+fmtN(bill.discAmt)+'</td></tr>'):''}
+      <tr><td colspan="6" style="padding:6px 8px;text-align:right;font-weight:700;border-top:2px solid #111">Grand Total</td><td style="padding:6px 8px;text-align:right;font-weight:700;border-top:2px solid #111">₹${fmtN(bill.grand)}</td></tr>
+    </tfoot>
   </table>
   <div style="display:flex;justify-content:flex-end;margin-top:.875rem">
     <table style="font-size:12px;border-collapse:collapse;min-width:280px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
@@ -1506,6 +1601,7 @@ function showPreview(bill){
     </table>
   </div>
   ${bankHtml}
+  ${footerHtml}
   <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:1.5rem;padding-top:.875rem;border-top:1px dashed #e5e7eb">
     <div style="font-size:11px;color:#6b7280">Thank you for your business!</div>
     <div style="text-align:center;width:160px">
@@ -1746,7 +1842,7 @@ function renderCust(){
   <button class="btn btp" onclick="addCust()">+ Add Customer</button></div>
   <div class="card"><div class="ct">Customers (${D.customers.length})</div>
   <table><thead><tr><th>Name</th><th>Mobile</th><th>GSTIN</th><th>Total Purchase</th><th>Outstanding</th><th></th></tr></thead>
-  <tbody>${D.customers.length?D.customers.map(c=>`<tr><td><b>${c.name}</b></td><td>${c.phone||'-'}</td><td>${c.gstin||'-'}</td><td>${fmt(c.totalPurchase||0)}</td><td>${+c.udhar>0?`<span class="udhar-amt">${fmt(c.udhar)}</span> <button class="btn bts btp" onclick="openUdharPayModal(${c.id})">Collect</button>`:'<span style="color:var(--ok-t)">✓ No dues</span>'}</td><td><button class="btn bts btd" onclick="delCust(${c.id})">&#x2715;</button></td></tr>`).join(''):'<tr><td colspan="6" style="text-align:center;padding:1.25rem;color:var(--t2)">No customers added</td></tr>'}</tbody>
+  <tbody>${D.customers.length?D.customers.map(c=>`<tr><td><b>${c.name}</b></td><td>${c.phone||'-'}</td><td>${c.gstin||'-'}</td><td>${fmt(c.totalPurchase||0)}</td><td>${+c.udhar>0?`<span class="udhar-amt">${fmt(c.udhar)}</span> <button class="btn bts btp" onclick="openUdharPayModal(${c.id})">Collect</button>`:'<span style="color:var(--ok-t)">✓ Clear</span>'}</td><td style="white-space:nowrap"><button class="btn bts" onclick="openCustStmt(${c.id})" title="Statement">📋</button> <button class="btn bts btd" onclick="delCust(${c.id})">✕</button></td></tr>`).join(''):'<tr><td colspan="6" style="text-align:center;padding:1.25rem;color:var(--t2)">No customers added</td></tr>'}</tbody>
   </table></div>`;
 }
 async function addCust(){
@@ -1788,6 +1884,59 @@ async function quickSaveCust(){
     sel.appendChild(opt);sel.value=c.id;
   }
 }
+function openCustStmt(custId){
+  const cust=D.customers.find(x=>x.id===+custId);if(!cust)return;
+  const bills=D.bills.filter(b=>b.custId&&+b.custId===+custId);
+  const totalBilled=bills.reduce((s,b)=>s+b.grand,0);
+  const outstanding=+(cust.udhar)||0;
+  const paid=totalBilled-outstanding;
+  const rows=bills.map(b=>{
+    const d=new Date(b.date).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+    const credit=b.payment==='Credit/Udhar'||b.payment==='उधार';
+    return '<tr>'
+      +'<td style="padding:5px 8px;border-bottom:1px solid var(--bdr)">'+d+'</td>'
+      +'<td style="padding:5px 8px;border-bottom:1px solid var(--bdr);font-weight:600">'+billNo(b.id)+'</td>'
+      +'<td style="padding:5px 8px;border-bottom:1px solid var(--bdr);text-align:right;color:var(--err-t);font-weight:600">'+fmt(b.grand)+'</td>'
+      +'<td style="padding:5px 8px;border-bottom:1px solid var(--bdr);text-align:center">'
+      +(credit?'<span style="background:var(--warn-bg);color:var(--warn-t);padding:1px 7px;border-radius:20px;font-size:11px">Credit</span>'
+             :'<span style="background:var(--ok-bg);color:var(--ok-t);padding:1px 7px;border-radius:20px;font-size:11px">'+b.payment+'</span>')
+      +'</td></tr>';
+  }).join('');
+  const waMsg=encodeURIComponent('Dear '+cust.name+',\n\nAccount Statement — '+D.settings.shopName+'\n\nTotal Billed : \u20b9'+fmtN(totalBilled)+'\nAmount Paid  : \u20b9'+fmtN(paid)+'\nOutstanding  : \u20b9'+fmtN(outstanding)+'\n\n'+(outstanding>0?'Kindly clear your dues.':'Your account is clear. Thank you!'));
+  document.getElementById('modal-root').innerHTML=`
+<div class="modal-wrap" onclick="if(event.target===this)closeModal()">
+<div class="modal-box" style="max-width:520px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+    <h3 style="font-size:15px;font-weight:700">📋 Account Statement</h3>
+    <button class="btn bts btd" onclick="closeModal()">✕</button>
+  </div>
+  <div style="background:var(--bg2);border-radius:10px;padding:.875rem 1rem;margin-bottom:.875rem">
+    <div style="font-weight:700;font-size:15px">${cust.name}</div>
+    <div style="font-size:12px;color:var(--t2);margin-top:2px">${cust.phone||''}${cust.gstin?' | '+cust.gstin:''}</div>
+  </div>
+  <div class="g3" style="margin-bottom:.875rem">
+    <div class="sc"><div class="lbl">Total Billed</div><div class="val" style="font-size:16px">${fmt(totalBilled)}</div></div>
+    <div class="sc"><div class="lbl">Paid</div><div class="val" style="font-size:16px;color:var(--ok-t)">${fmt(paid)}</div></div>
+    <div class="sc"><div class="lbl">Outstanding</div><div class="val" style="font-size:16px;color:var(--err-t)">${fmt(outstanding)}</div></div>
+  </div>
+  <div style="max-height:260px;overflow-y:auto;border:1px solid var(--bdr);border-radius:9px;margin-bottom:.875rem">
+    <table style="width:100%;font-size:12px;border-collapse:collapse">
+      <thead><tr style="background:var(--bg2)">
+        <th style="padding:6px 8px;text-align:left">Date</th>
+        <th style="padding:6px 8px;text-align:left">Invoice</th>
+        <th style="padding:6px 8px;text-align:right">Amount</th>
+        <th style="padding:6px 8px;text-align:center">Payment</th>
+      </tr></thead>
+      <tbody>${rows||'<tr><td colspan="4" style="text-align:center;padding:1rem;color:var(--t2)">No bills found</td></tr>'}</tbody>
+    </table>
+  </div>
+  <div class="fr" style="justify-content:flex-end;gap:8px;flex-wrap:wrap">
+    ${cust.phone?'<a href="https://wa.me/91'+cust.phone+'?text='+waMsg+'" target="_blank" style="text-decoration:none"><button class="btn btg bts">📲 WhatsApp</button></a>':''}
+    ${outstanding>0?'<button class="btn btp bts" onclick="closeModal();setTimeout(()=>openUdharPayModal('+cust.id+'),100)">💰 Collect</button>':''}
+  </div>
+</div></div>`;
+}
+
 function closeModal(){document.getElementById('modal-root').innerHTML=''}
 
 // ── CAMERA BARCODE SCANNER ──
@@ -2095,6 +2244,17 @@ function renderSettings(){
   <div class="fg" style="margin-bottom:.875rem"><label>Shop Full Address</label>
     <input id="sad" value="${s.address||''}" placeholder="Full address to be shown on bill">
   </div>
+  <div class="fg" style="margin-bottom:.875rem">
+    <label>Shop Logo (shown on bill)</label>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      ${s.logoImg?'<img src="'+s.logoImg+'" style="height:48px;border-radius:6px;border:1px solid var(--bdr);object-fit:contain;background:#fff;padding:2px" alt="logo">':'<span style="font-size:12px;color:var(--t2)">No logo</span>'}
+      <div>
+        <input type="file" id="slogo" accept="image/*" onchange="handleLogoUpload(this)" style="font-size:11px;padding:4px 6px;min-height:auto;width:auto">
+        ${s.logoImg?'<button class="btn bts btd" style="margin-top:4px;display:block;font-size:11px" onclick="removeLogo()">Remove</button>':''}
+      </div>
+    </div>
+    <p style="font-size:11px;color:var(--t2);margin-top:4px">Max 300KB. PNG/JPG recommended.</p>
+  </div>
   <div class="hr"></div>
   <div class="ct" style="margin-bottom:.625rem">Bill Number Settings</div>
   <div class="g3" style="margin-bottom:.875rem">
@@ -2118,6 +2278,14 @@ function renderSettings(){
     <div class="fg"><label>UPI ID</label><input id="supi" value="${s.upiId||''}" placeholder="name@upi or 9876543210@paytm"></div>
     <div class="fg"></div>
   </div>
+  <div class="hr"></div>
+  <div class="ct" style="margin-bottom:.625rem">Bill Customization</div>
+  <div class="fg"><label>Footer Message (optional)</label>
+    <input id="sfooter" value="${s.footerMsg||''}" placeholder="e.g. Thank you! Returns accepted within 7 days.">
+  </div>
+  <div class="fg" style="margin-bottom:.875rem"><label>Terms & Conditions (optional)</label>
+    <input id="sterms" value="${s.termsMsg||''}" placeholder="e.g. Goods once sold will not be taken back.">
+  </div>
   <button class="btn btp" onclick="saveSett()">💾 Save Settings</button></div>
 
   <div class="card"><div class="ct">Account</div>
@@ -2130,6 +2298,15 @@ function renderSettings(){
   </div></div>`;
 }
 
+function handleLogoUpload(inp){
+  const f=inp.files[0];if(!f)return;
+  if(f.size>400*1024){toast('Image too large (max 400KB)','err');return;}
+  const r=new FileReader();
+  r.onload=e=>{D.settings.logoImg=e.target.result;saveLocal();renderSettings();toast('Logo saved ✓');};
+  r.readAsDataURL(f);
+}
+function removeLogo(){D.settings.logoImg='';saveLocal();renderSettings();toast('Logo removed');}
+
 async function saveSett(){
   Object.assign(D.settings,{
     shopName:document.getElementById('ss').value,gstin:document.getElementById('sgs').value,
@@ -2139,7 +2316,10 @@ async function saveSett(){
     accountHolder:document.getElementById('sah').value,
     bankName:document.getElementById('sbn').value,
     accountNo:document.getElementById('sac').value,ifsc:document.getElementById('sif').value,
-    upiId:document.getElementById('supi').value
+    upiId:document.getElementById('supi').value,
+    footerMsg:document.getElementById('sfooter')?.value||'',
+    termsMsg:document.getElementById('sterms')?.value||'',
+    logoImg:D.settings.logoImg||''
   });
   saveLocal();
   try{
