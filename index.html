@@ -452,10 +452,23 @@ function _extractRoleFromSession(session){
     if(!session?.access_token) return;
     const payload=JSON.parse(atob(session.access_token.split('.')[1]));
     currentUserRole = payload.user_role || 'user';
-    console.log('Role loaded from JWT:', currentUserRole);
+    console.log('Role from JWT:', currentUserRole);
   }catch(e){
     currentUserRole='user';
-    console.log('Role extract failed:', e.message);
+    console.log('JWT role extract failed:', e.message);
+  }
+}
+
+// ── DB से role verify करें — Hook enable न हो तो fallback ──
+async function _verifyRoleFromDB(){
+  try{
+    const {data,error}=await sb.from('user_roles').select('role').eq('user_id',currentUser.id).single();
+    if(!error && data?.role){
+      currentUserRole=data.role;
+      console.log('Role from DB:', currentUserRole);
+    }
+  }catch(e){
+    console.log('DB role check skipped:', e.message);
   }
 }
 
@@ -1023,11 +1036,16 @@ async function createShopInDB(shopName,gstin,phone,userId){
 }
 
 async function loadShopForUser(){
-  // Fresh JWT से role ensure करें (Supabase Hook inject हो चुका हो)
+  // Step 1: Fresh JWT से role लें
   try{
     const {data:{session}}=await sb.auth.getSession();
     if(session){ _extractRoleFromSession(session); localStorage.setItem('sb-session',JSON.stringify(session)); }
   }catch(_){}
+
+  // Step 2: JWT में role नहीं है (Hook अभी enable नहीं) तो DB से check करें
+  if(currentUserRole==='user'){
+    await _verifyRoleFromDB();
+  }
 
   try{
     const {data,error}=await sb.from('shops').select('*').eq('owner_id',currentUser.id).single();
