@@ -1072,7 +1072,7 @@ function renderApp(){
     <div class="sname">${s.shopName||'Shop'}</div>
     <div class="gstin">${s.gstin||'GSTIN not set'}</div>
   </div>
-  ${currentUser?.email===ADMIN_EMAIL?'<div class="nav" onclick="openAdmin()" style="color:#7c3aed;font-weight:600">👑 Admin Panel</div>':''}
+  ${isAdminUser()?'<div class="nav" onclick="openAdmin()" style="color:#7c3aed;font-weight:600">👑 Admin Panel</div>':''}
   <div class="sync-badge sync-off" id="sync-dot">● Syncing...</div>
   ${tabs.map((t,i)=>`<div class="nav${activeTab===t?' on':''}" onclick="sw('${t}')">${labels[i]}</div>`).join('')}
   <div class="sidebar-footer">
@@ -2339,8 +2339,14 @@ function expBill(id){const b=D.bills.find(x=>x.id===id);if(!b)return;dlCSV(csv([
 
 
 // ── TRIAL SYSTEM ──
+function isAdminUser(){
+  const email=currentUser?.email||currentUser?.user_metadata?.email||'';
+  return email===ADMIN_EMAIL;
+}
+
 function checkTrialStatus(){
-  if(currentUser?.email===ADMIN_EMAIL)return;
+  // Admin को कोई trial नहीं
+  if(isAdminUser())return;
 
   // Block check
   if(D.settings?.blocked){
@@ -2351,8 +2357,13 @@ function checkTrialStatus(){
   const createdAt=currentUser?.created_at||currentUser?.user_metadata?.created_at;
   if(!createdAt)return;
   const daysSince=Math.floor((Date.now()-new Date(createdAt).getTime())/(1000*60*60*24));
-  D.trialDaysLeft=Math.max(0,TRIAL_DAYS-daysSince);
-  D.trialExpired=daysSince>TRIAL_DAYS;
+
+  // अगर shop के settings में paidDays है तो उसे trial में जोड़ें
+  const extraDays=parseInt(D.settings?.paidDays||0,10);
+  const effectiveDays=TRIAL_DAYS+extraDays;
+
+  D.trialDaysLeft=Math.max(0,effectiveDays-daysSince);
+  D.trialExpired=daysSince>effectiveDays;
 
   if(D.trialExpired){
     showTrialExpiredModal();
@@ -2591,7 +2602,7 @@ function expPurchases(){
 
 // ── ADMIN PANEL ──
 async function openAdmin(){
-  if(currentUser?.email!==ADMIN_EMAIL){toast('Access denied','err');return;}
+  if(!isAdminUser()){toast('Access denied','err');return;}
   activeTab='admin';
   const el=document.getElementById('ptitle');if(el)el.textContent='👑 Admin Panel';
   // Clear all tabs
@@ -2669,11 +2680,13 @@ async function renderAdmin(){
       +'<div class="sc"><div class="lbl">Total Bills</div><div class="val">'+(Array.isArray(billData)?billData.length:0)+'</div></div>'
       +'</div>'
       +'<div class="card"><div class="ct">All Registered Shops</div><div style="overflow-x:auto">'
-      +'<table><thead><tr><th>Shop</th><th>Contact</th><th>Bills</th><th>Joined</th><th>Trial</th><th>Status</th><th>Action</th></tr></thead><tbody>'
+      +'<table><thead><tr><th>Shop</th><th>Contact</th><th>Bills</th><th>Joined</th><th>Trial</th><th>Status</th><th>Block</th><th>Payment (दिन)</th></tr></thead><tbody>'
       +shopList.map(s=>{
         const joinedDays=s.created_at?Math.floor((now-new Date(s.created_at).getTime())/(864e5)):0;
-        const trialLeft=Math.max(0,TRIAL_DAYS-joinedDays);
-        const trialExpired=joinedDays>TRIAL_DAYS;
+        const extraDays=parseInt(s.settings?.paidDays||0,10);
+        const effectiveDays=TRIAL_DAYS+extraDays;
+        const trialLeft=Math.max(0,effectiveDays-joinedDays);
+        const trialExpired=joinedDays>effectiveDays;
         const isBlocked=s.settings?.blocked||false;
         const bills=countMap[s.id]||0;
         const phone=s.settings?.phone||'';
@@ -2682,15 +2695,39 @@ async function renderAdmin(){
           +'<td style="font-size:11px">'+(phone?'<a href="https://wa.me/91'+phone+'" target="_blank" style="color:var(--acc)">📲 '+phone+'</a>':'-')+'</td>'
           +'<td><span class="bdg '+(bills>0?'bg':'by')+'">'+bills+'</span></td>'
           +'<td style="font-size:11px">'+(s.created_at?new Date(s.created_at).toLocaleDateString('en-IN'):'-')+'</td>'
-          +'<td>'+(trialExpired?'<span class="bdg br">Expired</span>':'<span class="bdg bg">'+trialLeft+'d left</span>')+'</td>'
+          +'<td>'+(trialExpired?'<span class="bdg br">Expired</span>'+(extraDays>0?' <span class="bdg bg">+'+extraDays+'d paid</span>':''):'<span class="bdg bg">'+trialLeft+'d left</span>'+(extraDays>0?' <span class="bdg bb">+'+extraDays+'d</span>':''))+'</td>'
           +'<td>'+(isBlocked?'<span class="bdg br">Blocked</span>':'<span class="bdg bg">Active</span>')+'</td>'
-          +'<td><button class="btn bts '+(isBlocked?'btp':'btd')+'" onclick="adminToggleBlock(this)" data-sid="'+s.id+'" data-blocked="'+isBlocked+'">'+(isBlocked?'✓ Unblock':'⊘ Block')+'</button></td>'
+          +'<td style="white-space:nowrap">'
+          +'<button class="btn bts '+(isBlocked?'btp':'btd')+'" onclick="adminToggleBlock(this)" data-sid="'+s.id+'" data-blocked="'+isBlocked+'">'+(isBlocked?'✓ Unblock':'⊘ Block')+'</button> '
+          +'<span style="display:inline-flex;align-items:center;gap:4px">'
+          +'<input type="number" id="days-'+s.id+'" min="1" max="365" value="30" style="width:56px;font-size:12px;padding:4px 6px;min-height:0;height:30px;border-radius:6px;border:1px solid var(--bdr2);text-align:center">'
+          +'<button class="btn bts" style="background:#16a34a;color:#fff;border-color:#16a34a;height:30px;padding:0 8px" onclick="adminPaymentAccepted(\''+s.id+'\')">✓ Paid</button>'
+          +'</span>'
+          +'</td>'
           +'</tr>';
       }).join('')
       +'</tbody></table></div></div>';
   }catch(e){
     el.innerHTML='<div class="card"><p style="color:var(--err-t)">Error: '+e.message+'</p>'
       +'<button class="btn btp" style="margin-top:1rem" onclick="renderAdmin()">↻ Retry</button></div>';
+  }
+}
+
+async function adminPaymentAccepted(shopId){
+  const inp=document.getElementById('days-'+shopId);
+  const days=parseInt(inp?.value||30,10);
+  if(isNaN(days)||days<1){toast('Valid दिन डालें','err');return;}
+  if(!confirm('क्या इस shop को '+days+' दिन के लिए activate करें?'))return;
+  try{
+    const {data:shop}=await sb.from('shops').select('settings').eq('id',shopId).single();
+    const existing=parseInt(shop.settings?.paidDays||0,10);
+    const newSettings={...(shop.settings||{}),paidDays:existing+days,blocked:false};
+    const {error}=await sb.from('shops').update({settings:newSettings}).eq('id',shopId);
+    if(error)throw error;
+    toast('✓ Payment accepted — '+days+' दिन add हुए!');
+    renderAdmin();
+  }catch(e){
+    toast('Error: '+e.message,'err');
   }
 }
 
