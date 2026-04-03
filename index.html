@@ -430,7 +430,14 @@ function initApp() {
       await loadShopForUser();
     }
     if(event==='TOKEN_REFRESHED' && session){
-      _extractRoleFromSession(session);
+      // JWT में user_role हो तभी override करें — नहीं तो DB-verified role रहने दें
+      try{
+        const payload=JSON.parse(atob(session.access_token.split('.')[1]));
+        if(payload.user_role && payload.user_role!=='user'){
+          currentUserRole=payload.user_role; // Hook से आया — trust करें
+        }
+        // अगर JWT में 'user' है और हमारे पास DB से 'admin' है — रखें
+      }catch(_){}
       if(currentUser) localStorage.setItem('sb-session', JSON.stringify(session));
       return;
     }
@@ -451,10 +458,15 @@ function _extractRoleFromSession(session){
   try{
     if(!session?.access_token) return;
     const payload=JSON.parse(atob(session.access_token.split('.')[1]));
-    currentUserRole = payload.user_role || 'user';
-    console.log('Role from JWT:', currentUserRole);
+    if(payload.user_role && payload.user_role !== 'user'){
+      // Hook ने explicitly कोई role inject की — trust करें
+      currentUserRole = payload.user_role;
+      console.log('Role from JWT:', currentUserRole);
+    } else if(currentUserRole === 'user'){
+      // JWT में role नहीं — अगर पहले DB से admin मिला था तो मत बदलो
+      console.log('Role from JWT: user (keeping existing:', currentUserRole, ')');
+    }
   }catch(e){
-    currentUserRole='user';
     console.log('JWT role extract failed:', e.message);
   }
 }
@@ -463,9 +475,17 @@ function _extractRoleFromSession(session){
 async function _verifyRoleFromDB(){
   try{
     const {data,error}=await sb.from('user_roles').select('role').eq('user_id',currentUser.id).single();
-    if(!error && data?.role){
-      currentUserRole=data.role;
+    if(error){
+      console.log('user_roles error:', error.message, error.code);
+      return;
+    }
+    if(data?.role && data.role !== currentUserRole){
+      currentUserRole = data.role;
       console.log('Role from DB:', currentUserRole);
+      // Role बदली — sidebar re-render करें ताकि Admin Panel दिखे
+      if(document.getElementById('root')?.querySelector('.app')){
+        renderApp();
+      }
     }
   }catch(e){
     console.log('DB role check skipped:', e.message);
