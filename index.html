@@ -11,6 +11,7 @@
 <link rel="manifest" href="/apna-dukan/manifest.json">
 <title>My Shop — GST Billing App</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js" crossorigin="anonymous"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -317,9 +318,10 @@ const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 // ============================================================
 
 // ── APP CONFIG ──
-const TRIAL_DAYS   = 15;               // Free trial days
-const PAYMENT_UPI  = 'kumaramit5293@upi';
-const CONTACT_PHONE= '9122785333';
+const TRIAL_DAYS = 15;  // Free trial days
+// getPaymentUPI() और getContactPhone() अब Supabase shop settings से आते हैं (source code में नहीं)
+function getPaymentUPI(){ return D.settings?.adminUPI || '' }
+function getContactPhone(){ return D.settings?.adminPhone || '' }
 
 // ── PWA MANIFEST — manifest.json file se load hota hai ──
 
@@ -387,6 +389,22 @@ let sb, currentUser=null, currentShop=null, activeTab='dashboard';
 let currentUserRole='user';
 let D={products:[],customers:[],bills:[],purchases:[],billItems:[],udhar:[],settings:{}};
 let syncOk=false, _authHandled=false;
+let _lastAuthAttempt=0, _authAttemptCount=0;
+
+// ── Rate limiting: brute force से बचाव ──
+function _checkRateLimit(){
+  const now=Date.now();
+  if(now-_lastAuthAttempt<1000){return false;} // 1 sec minimum gap
+  if(now-_lastAuthAttempt<30000) _authAttemptCount++;
+  else _authAttemptCount=1;
+  _lastAuthAttempt=now;
+  if(_authAttemptCount>5){
+    const wait=Math.ceil((30000-(now-_lastAuthAttempt+30000*((_authAttemptCount-5)/5)))/1000);
+    setAlert('auth-alert',`बहुत ज़्यादा attempts — ${Math.max(10,wait)} seconds बाद try करें`,'warn');
+    return false;
+  }
+  return true;
+}
 
 // ── SUPABASE INIT ──
 function initApp() {
@@ -503,7 +521,7 @@ function openCustStmt(custId){
     <button class="btn bts btd" onclick="closeModal()">✕</button>
   </div>
   <div style="background:var(--bg2);border-radius:10px;padding:.875rem 1rem;margin-bottom:.875rem">
-    <div style="font-weight:700;font-size:15px">${cust.name}</div>
+    <div style="font-weight:700;font-size:15px">${safeText(cust.name)}</div>
     <div style="font-size:12px;color:var(--t2);margin-top:2px">${cust.phone||''}${cust.gstin?' | '+cust.gstin:''}</div>
   </div>
   <div class="g3" style="margin-bottom:.875rem">
@@ -532,7 +550,9 @@ function openCustStmt(custId){
 function closeModal(){document.getElementById('modal-root').innerHTML=''}
 function toast(msg,type='ok'){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';t.style.color=type==='err'?'var(--err-t)':type==='warn'?'var(--warn-t)':'var(--ok-t)';clearTimeout(t._to);t._to=setTimeout(()=>t.style.display='none',3500)}
 function updSync(ok){syncOk=ok;const el=document.getElementById('sync-dot');if(el){el.className='sync-badge '+(ok?'sync-ok':'sync-off');el.textContent=ok?'● Cloud Sync On':'● Offline Mode'}}
-function setAlert(id,msg,type='err'){const el=document.getElementById(id);if(el)el.innerHTML=msg?`<div class="alert alert-${type}">${msg}</div>`:'';}
+function setAlert(id,msg,type='err'){const el=document.getElementById(id);if(el)el.innerHTML=msg?`<div class="alert alert-${type}">${typeof DOMPurify!=='undefined'?DOMPurify.sanitize(msg):msg}</div>`:''}
+function safeText(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+function safeHTML(h){return typeof DOMPurify!=='undefined'?DOMPurify.sanitize(h):safeText(h)}
 
 // ── INIT ──
 async function renderRoot(){
@@ -784,6 +804,7 @@ function renderForgot(){
 
 // ── AUTH ACTIONS ──
 async function doLogin(){
+  if(!_checkRateLimit())return;
   const email=document.getElementById('a-email').value.trim();
   const pass=document.getElementById('a-pass').value;
   if(!email||!pass){setAlert('auth-alert','Please enter Email and Password');return;}
@@ -829,6 +850,7 @@ async function doLogin(){
 }
 
 async function doSignup(){
+  if(!_checkRateLimit())return;
   const shopName=document.getElementById('a-shop').value.trim();
   const email=document.getElementById('a-email').value.trim();
   const pass=document.getElementById('a-pass').value;
@@ -853,15 +875,15 @@ async function doSignup(){
       const existing=dupQuery.data;
       const nameDup=existing.find(s=>s.name&&s.name.toLowerCase()===shopName.toLowerCase());
       const gstinDup=gstin&&existing.find(s=>s.gstin&&s.gstin.toUpperCase()===gstin.toUpperCase());
-      const waLink='https://wa.me/91'+CONTACT_PHONE+'?text='+encodeURIComponent('Hello, I want to register my shop: '+shopName+(gstin?' (GSTIN: '+gstin+')':''));
+      const waLink='https://wa.me/91'+getContactPhone()+'?text='+encodeURIComponent('Hello, I want to register my shop: '+shopName+(gstin?' (GSTIN: '+gstin+')':''));
       if(nameDup){
         btn.disabled=false;btn.textContent='Create Account →';
-        setAlert('auth-alert','⚠️ A shop with this name is already registered.<br><a href="'+waLink+'" target="_blank" style="color:var(--acc)">📲 Contact Admin on WhatsApp ('+CONTACT_PHONE+')</a>');
+        setAlert('auth-alert','⚠️ A shop with this name is already registered.<br><a href="'+waLink+'" target="_blank" style="color:var(--acc)">📲 Contact Admin on WhatsApp ('+getContactPhone()+')</a>');
         return;
       }
       if(gstinDup){
         btn.disabled=false;btn.textContent='Create Account →';
-        setAlert('auth-alert','⚠️ This GSTIN is already registered.<br><a href="'+waLink+'" target="_blank" style="color:var(--acc)">📲 Contact Admin on WhatsApp ('+CONTACT_PHONE+')</a>');
+        setAlert('auth-alert','⚠️ This GSTIN is already registered.<br><a href="'+waLink+'" target="_blank" style="color:var(--acc)">📲 Contact Admin on WhatsApp ('+getContactPhone()+')</a>');
         return;
       }
     }
@@ -1001,6 +1023,12 @@ async function createShopInDB(shopName,gstin,phone,userId){
 }
 
 async function loadShopForUser(){
+  // Fresh JWT से role ensure करें (Supabase Hook inject हो चुका हो)
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    if(session){ _extractRoleFromSession(session); localStorage.setItem('sb-session',JSON.stringify(session)); }
+  }catch(_){}
+
   try{
     const {data,error}=await sb.from('shops').select('*').eq('owner_id',currentUser.id).single();
     if(error||!data){
@@ -1182,7 +1210,7 @@ function renderDash(){
 <div class="g2">
   <div class="card"><div class="ct">Recent Bills</div>
     <table><thead><tr><th>Bill No.</th><th>Customer</th><th>Amount</th><th>Payment</th></tr></thead>
-    <tbody>${[...D.bills].slice(0,6).map(b=>`<tr><td>${billNo(b.id)}</td><td>${b.customer}</td><td>${fmt(b.grand)}</td><td><span class="bdg bb">${b.payment}</span></td></tr>`).join('')||'<tr><td colspan="4" style="text-align:center;padding:1rem;color:var(--t2)">No bills found</td></tr>'}</tbody>
+    <tbody>${[...D.bills].slice(0,6).map(b=>`<tr><td>${billNo(b.id)}</td><td>${safeText(b.customer)}</td><td>${fmt(b.grand)}</td><td><span class="bdg bb">${b.payment}</span></td></tr>`).join('')||'<tr><td colspan="4" style="text-align:center;padding:1rem;color:var(--t2)">No bills found</td></tr>'}</tbody>
     </table></div>
   <div class="card"><div class="ct" style="display:flex;justify-content:space-between">Outstanding Dues <button class="btn bts btp" onclick="sw('udhar')">View All →</button></div>
     <table><thead><tr><th>Customer</th><th>Amount Due</th><th></th></tr></thead>
@@ -1313,7 +1341,7 @@ function prodAC(v){
   drop.style.display='block';
   drop.innerHTML=list.map((p,i)=>`<div class="ac-item" data-idx="${i}" onclick="pickProd(${p.id})">
     <div style="display:flex;justify-content:space-between;align-items:center">
-      <b>${p.name}</b>
+      <b>${safeText(p.name)}</b>
       <span style="font-size:11px;color:var(--acc);font-weight:600">${fmt(p.sellPrice)}</span>
     </div>
     <small style="color:var(--t2)">GST: ${p.gst}% ${p.hsn?'| HSN: '+p.hsn:''} ${+p.minStock>0?'| Stock: '+p.stock+' '+p.unit:''}</small>
@@ -1413,7 +1441,7 @@ function renderBillItems(){
   const tb=document.getElementById('bi-body');if(!tb)return;
   const items=D.billItems||[];
   if(!items.length)tb.innerHTML='<tr><td colspan="9" style="text-align:center;padding:1rem;color:var(--t2)">No items added</td></tr>';
-  else tb.innerHTML=items.map((item,i)=>`<tr><td>${item.name}${item.hsn?'<br><small style="color:var(--t3)">HSN:'+item.hsn+'</small>':''}</td><td>${item.qty}</td><td>${fmt(item.rate)}</td><td>${item.gst}%</td><td>${fmt(item.base)}</td><td>${fmt(item.gstAmt)}</td><td><b>${fmt(item.total)}</b></td><td style="white-space:nowrap"><button class="btn bts" onclick="editItem(${i})" style="margin-right:3px" title="Edit">✏️</button><button class="btn bts btd" onclick="rmItem(${i})" title="Remove">✕</button></td></tr>`).join('');
+  else tb.innerHTML=items.map((item,i)=>`<tr><td>${safeText(item.name)}${item.hsn?'<br><small style="color:var(--t3)">HSN:'+item.hsn+'</small>':''}</td><td>${item.qty}</td><td>${fmt(item.rate)}</td><td>${item.gst}%</td><td>${fmt(item.base)}</td><td>${fmt(item.gstAmt)}</td><td><b>${fmt(item.total)}</b></td><td style="white-space:nowrap"><button class="btn bts" onclick="editItem(${i})" style="margin-right:3px" title="Edit">✏️</button><button class="btn bts btd" onclick="rmItem(${i})" title="Remove">✕</button></td></tr>`).join('');
   const sub=items.reduce((s,i)=>s+i.base,0),gt=items.reduce((s,i)=>s+i.gstAmt,0);
   const grand=sub+gt;
   const roundOff=Math.round(grand)-grand;
@@ -1584,7 +1612,7 @@ function showPreview(bill){
   const ds=d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
   const roundOff=Math.round(bill.grand)-bill.grand;
   const totalPayable=Math.round(bill.grand);
-  const rows=bill.items.map((item,i)=>`<tr><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">${i+1}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">${item.name}${item.hsn?'<br><small style="color:#6b7280;font-size:10px">HSN: '+item.hsn+'</small>':''}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:center">${item.qty}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${fmtN(item.rate)}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:center">${item.gst}%</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${fmtN(item.gstAmt)}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:700">${fmtN(item.total)}</td></tr>`).join('');
+  const rows=bill.items.map((item,i)=>`<tr><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">${i+1}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb">${safeText(item.name)}${item.hsn?'<br><small style="color:#6b7280;font-size:10px">HSN: '+item.hsn+'</small>':''}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:center">${item.qty}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${fmtN(item.rate)}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:center">${item.gst}%</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${fmtN(item.gstAmt)}</td><td style="padding:5px 8px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:700">${fmtN(item.total)}</td></tr>`).join('');
   const bankHtml=(s.bankName||s.accountNo||s.upiId)?`<div style="margin-top:.875rem;padding:.75rem;border:1px solid #e5e7eb;border-radius:9px;font-size:11px"><p style="font-weight:700;margin-bottom:6px">💳 Payment Details</p><table style="font-size:11px;width:100%;border-collapse:collapse">${s.accountHolder?'<tr><td style="padding:2px 0;color:#6b7280">A/C Holder</td><td style="padding:2px 8px">:</td><td style="font-weight:600">'+s.accountHolder+'</td></tr>':''}${s.bankName?'<tr><td style="padding:2px 0;color:#6b7280">Bank</td><td style="padding:2px 8px">:</td><td>'+s.bankName+'</td></tr>':''}${s.accountNo?'<tr><td style="padding:2px 0;color:#6b7280">A/C No</td><td style="padding:2px 8px">:</td><td>'+s.accountNo+'</td></tr>':''}${s.ifsc?'<tr><td style="padding:2px 0;color:#6b7280">IFSC</td><td style="padding:2px 8px">:</td><td>'+s.ifsc+'</td></tr>':''}${s.upiId?'<tr><td style="padding:2px 0;color:#6b7280">UPI</td><td style="padding:2px 8px">:</td><td style="font-weight:700">'+s.upiId+'</td></tr>':''}</table></div>`:'';
 
   const logoHtml=s.logoImg?('<img src="'+s.logoImg+'" style="height:60px;object-fit:contain;display:block;margin:0 auto 8px" alt="logo">'):'';
@@ -1753,7 +1781,7 @@ function invRows(f=''){
     const low=hasStock&&+p.stock<=+(p.minStock||5);
     const stockDisp=+p.minStock>0?(p.stock+' '+p.unit):'-';
     const status=hasStock?(low?'<span class="bdg br">Low</span>':'<span class="bdg bg">OK</span>'):'<span class="bdg" style="background:var(--bg2);color:var(--t2)">N/A</span>';
-    return`<tr><td><b>${p.name}</b></td><td style="font-size:11px;color:var(--t2)">${p.barcode||'-'}</td><td>${p.hsn||'-'}</td><td>${p.gst}%</td><td>${fmt(p.buyPrice)}</td><td>${fmt(p.sellPrice)}</td><td>${stockDisp}</td><td>${status}</td><td><button class="btn bts btd" onclick="delProd(${p.id})">✕</button></td></tr>`}).join('')
+    return`<tr><td><b>${safeText(p.name)}</b></td><td style="font-size:11px;color:var(--t2)">${p.barcode||'-'}</td><td>${p.hsn||'-'}</td><td>${p.gst}%</td><td>${fmt(p.buyPrice)}</td><td>${fmt(p.sellPrice)}</td><td>${stockDisp}</td><td>${status}</td><td><button class="btn bts btd" onclick="delProd(${p.id})">✕</button></td></tr>`}).join('')
 }
 function filterInv(v){const t=document.getElementById('inv-tb');if(t)t.innerHTML=invRows(v)}
 
@@ -1764,7 +1792,7 @@ function invProdAC(v){
   if(!list.length){drop.style.display='none';return}
   drop.style.display='block';
   drop.innerHTML=list.map(p=>`<div class="ac-item" onclick="fillInvForm('${p.name.replace(/'/g,"\'")}',${p.id})">
-    <b>${p.name}</b>
+    <b>${safeText(p.name)}</b>
     <small style="color:var(--t2)">Buy: ${fmt(p.buyPrice)} | Sell: ${fmt(p.sellPrice)} | Stock: ${p.stock}</small>
   </div>`).join('');
 }
@@ -1931,7 +1959,7 @@ function openCustStmt(custId){
     <button class="btn bts btd" onclick="closeModal()">✕</button>
   </div>
   <div style="background:var(--bg2);border-radius:10px;padding:.875rem 1rem;margin-bottom:.875rem">
-    <div style="font-weight:700;font-size:15px">${cust.name}</div>
+    <div style="font-weight:700;font-size:15px">${safeText(cust.name)}</div>
     <div style="font-size:12px;color:var(--t2);margin-top:2px">${cust.phone||''}${cust.gstin?' | '+cust.gstin:''}</div>
   </div>
   <div class="g3" style="margin-bottom:.875rem">
@@ -2100,7 +2128,7 @@ function renderUdhar(){
 <div class="card">
   <div class="ct">Credit History (Recent Bills)</div>
   <table><thead><tr><th>Bill No.</th><th>Date</th><th>Customer</th><th>Amount</th></tr></thead>
-  <tbody>${D.bills.filter(b=>b.payment==='Credit/Udhar').slice(0,10).map(b=>`<tr><td>${billNo(b.id)}</td><td>${new Date(b.date).toLocaleDateString('en-IN')}</td><td>${b.customer}</td><td><span class="udhar-amt">${fmt(b.grand)}</span></td></tr>`).join('')||'<tr><td colspan="4" style="text-align:center;padding:1rem;color:var(--t2)">No credit bills found</td></tr>'}</tbody>
+  <tbody>${D.bills.filter(b=>b.payment==='Credit/Udhar').slice(0,10).map(b=>`<tr><td>${billNo(b.id)}</td><td>${new Date(b.date).toLocaleDateString('en-IN')}</td><td>${safeText(b.customer)}</td><td><span class="udhar-amt">${fmt(b.grand)}</span></td></tr>`).join('')||'<tr><td colspan="4" style="text-align:center;padding:1rem;color:var(--t2)">No credit bills found</td></tr>'}</tbody>
   </table>
 </div>`;
 }
@@ -2146,7 +2174,7 @@ function renderBillsTab(){
   </div>
   <div style="overflow-x:auto">
   <table><thead><tr><th>Bill No.</th><th>Date</th><th>Customer</th><th>Taxable</th><th>GST</th><th>Total</th><th>Payment</th><th></th></tr></thead>
-  <tbody>${D.bills.length?D.bills.map(b=>`<tr><td><b>${billNo(b.id)}</b></td><td>${new Date(b.date).toLocaleDateString('en-IN')}</td><td>${b.customer}</td><td>${fmt(b.subtotal)}</td><td>${fmt(b.gstTotal)}</td><td>${fmt(b.grand)}</td><td><span class="bdg bb">${b.payment}</span></td><td style="white-space:nowrap"><button class="btn bts" onclick="openViewBill(${b.id})">👁</button> <button class="btn bts" onclick="openEditBill(${b.id})">✏️</button> <button class="btn bts btd" onclick="delBill(${b.id})">✕</button></td></tr>`).join(''):'<tr><td colspan="8" style="text-align:center;padding:1.25rem;color:var(--t2)">No bills found</td></tr>'}</tbody>
+  <tbody>${D.bills.length?D.bills.map(b=>`<tr><td><b>${billNo(b.id)}</b></td><td>${new Date(b.date).toLocaleDateString('en-IN')}</td><td>${safeText(b.customer)}</td><td>${fmt(b.subtotal)}</td><td>${fmt(b.gstTotal)}</td><td>${fmt(b.grand)}</td><td><span class="bdg bb">${b.payment}</span></td><td style="white-space:nowrap"><button class="btn bts" onclick="openViewBill(${b.id})">👁</button> <button class="btn bts" onclick="openEditBill(${b.id})">✏️</button> <button class="btn bts btd" onclick="delBill(${b.id})">✕</button></td></tr>`).join(''):'<tr><td colspan="8" style="text-align:center;padding:1.25rem;color:var(--t2)">No bills found</td></tr>'}</tbody>
   </table></div></div>`;
 }
 function viewBill(id){const b=D.bills.find(x=>x.id===id);if(!b)return;sw('billing');setTimeout(()=>showPreview(b),80)}
@@ -2163,7 +2191,7 @@ function editBill(id){
     <button class="btn bts btd" onclick="closeModal()">✕</button>
   </div>
   <div class="g2">
-    <div class="fg"><label>Customer</label><input id="eb-cust" value="${b.customer}"></div>
+    <div class="fg"><label>Customer</label><input id="eb-cust" value="${safeText(b.customer)}"></div>
     <div class="fg"><label>Payment</label>
       <select id="eb-pay"><option${b.payment==='Cash'?' selected':''}>Cash</option><option${b.payment==='UPI'?' selected':''}>UPI</option><option${b.payment==='Credit/Udhar'?' selected':''}>Credit/Udhar</option><option${b.payment==='Credit Card'?' selected':''}>Credit Card</option><option${b.payment==='Cheque'?' selected':''}>Cheque</option><option${b.payment==='Other'?' selected':''}>Other</option></select>
     </div>
@@ -2241,7 +2269,7 @@ function repRows(sel){
   const fl=D.bills.filter(b=>{const d=new Date(b.date);return(d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0'))===sel});
   if(!fl.length)return'<p style="text-align:center;padding:1.25rem;color:var(--t2);font-size:13px">No bills this month</p>';
   return`<div style="overflow-x:auto"><table><thead><tr><th>Invoice No</th><th>Date</th><th>Customer</th><th>GSTIN</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>Total GST</th><th>Invoice Total</th></tr></thead>
-  <tbody>${fl.map(b=>`<tr><td>${billNo(b.id)}</td><td>${new Date(b.date).toLocaleDateString('en-IN')}</td><td>${b.customer}</td><td>${b.custGstin||'-'}</td><td>${fmt(b.subtotal)}</td><td>${fmt(b.gstTotal/2)}</td><td>${fmt(b.gstTotal/2)}</td><td>${fmt(b.gstTotal)}</td><td><b>${fmt(b.grand)}</b></td></tr>`).join('')}
+  <tbody>${fl.map(b=>`<tr><td>${billNo(b.id)}</td><td>${new Date(b.date).toLocaleDateString('en-IN')}</td><td>${safeText(b.customer)}</td><td>${b.custGstin||'-'}</td><td>${fmt(b.subtotal)}</td><td>${fmt(b.gstTotal/2)}</td><td>${fmt(b.gstTotal/2)}</td><td>${fmt(b.gstTotal)}</td><td><b>${fmt(b.grand)}</b></td></tr>`).join('')}
   </tbody></table></div>`
 }
 function filterRep(v){const e=document.getElementById('rep-rows');if(e)e.innerHTML=repRows(v)}
@@ -2315,7 +2343,25 @@ function renderSettings(){
   <div class="fr">
     <button class="btn bto bts" onclick="syncAll()">↻ Force Sync</button>
     <button class="btn btd bts" onclick="if(confirm('Are you sure you want to Logout?'))doLogout()">↩ Logout</button>
-  </div></div>`;
+  </div></div>`
+  +'<div class="card"><div class="ct">Data &amp; Privacy</div>'
+  +'<p style="font-size:12px;color:var(--t2);margin-bottom:.875rem;line-height:1.6">Local cache में bills, products, customers का offline data store होता है। Clear करने पर cloud से fresh load होगा।</p>'
+  +'<div class="fr" style="flex-wrap:wrap;gap:8px">'
+  +'<button class="btn bts" onclick="clearLocalCache()" style="border-color:var(--warn-t);color:var(--warn-t)">🗑 Local Cache Clear</button>'
+  +'<button class="btn bts" onclick="exportAllData()" style="border-color:var(--acc);color:var(--acc)">⬇ Data Export (JSON)</button>'
+  +'</div>'
+  +'<p style="font-size:11px;color:var(--t3);margin-top:.625rem">Cache clear होने पर login session बना रहेगा — सिर्फ offline data हटेगा।</p>'
+  +'</div>'
+
+
+  +(isAdminUser()?'<div class="card"><div class="ct" style="color:#7c3aed">Admin Config</div>'
+  +'<p style="font-size:12px;color:var(--t2);margin-bottom:.75rem">Payment details यहाँ save होते हैं — source code में नहीं।</p>'
+  +'<div class="g2">'
+  +'<div class="fg"><label>Admin UPI ID</label><input id="s-adminupi" value="'+(s.adminUPI||'')+'"></div>'
+  +'<div class="fg"><label>WhatsApp Number</label><input id="s-adminph" value="'+(s.adminPhone||'')+'"></div>'
+  +'</div>'
+  +'<button class="btn bts" style="background:#7c3aed;color:#fff;border-color:#7c3aed" onclick="saveAdminConfig()">💾 Admin Config Save</button>'
+  +'</div>':'');
 }
 
 function handleLogoUpload(inp){
@@ -2325,6 +2371,46 @@ function handleLogoUpload(inp){
   r.onload=e=>{D.settings.logoImg=e.target.result;saveLocal();renderSettings();toast('Logo saved ✓');};
   r.readAsDataURL(f);
 }
+function clearLocalCache(){
+  if(!confirm('Local cache clear करें? अगली बार cloud से fresh data load होगा।'))return;
+  const keys=Object.keys(localStorage).filter(k=>k.startsWith('ld_'));
+  keys.forEach(k=>localStorage.removeItem(k));
+  D={products:[],customers:[],bills:[],purchases:[],billItems:[],udhar:[],settings:D.settings};
+  toast('Cache cleared ✓ — syncing...');
+  syncAll().catch(()=>{});
+}
+
+function exportAllData(){
+  const exportObj={
+    exportedAt:new Date().toISOString(),
+    shop:{id:currentShop?.id,settings:D.settings},
+    products:D.products,
+    customers:D.customers,
+    bills:D.bills,
+    purchases:D.purchases
+  };
+  const blob=new Blob([JSON.stringify(exportObj,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='apna_dukan_backup_'+new Date().toLocaleDateString('en-IN').replace(/\//g,'-')+'.json';
+  a.click();
+  toast('Data exported ✓');
+}
+
+async function saveAdminConfig(){
+  if(!isAdminUser()){toast('Access denied','err');return;}
+  const upi=(document.getElementById('s-adminupi')?.value||'').trim();
+  const ph=(document.getElementById('s-adminph')?.value||'').trim();
+  if(!upi||!ph){toast('UPI और Phone दोनों ज़रूरी हैं','err');return;}
+  D.settings.adminUPI=upi;
+  D.settings.adminPhone=ph;
+  try{
+    await sb.from('shops').update({settings:D.settings}).eq('id',currentShop.id);
+    saveLocal();
+    toast('Admin config saved ✓');
+  }catch(e){toast('Error: '+e.message,'err');}
+}
+
 function removeLogo(){D.settings.logoImg='';saveLocal();renderSettings();toast('Logo removed');}
 
 async function saveSett(){
@@ -2392,7 +2478,7 @@ function checkTrialStatus(){
     if(banner){
       if(D.trialDaysLeft<=7){
         banner.style.display='block';
-        banner.innerHTML='⏳ Trial expires in <b>'+D.trialDaysLeft+' days</b>. Pay to continue — Contact: <a href="https://wa.me/91'+CONTACT_PHONE+'" target="_blank" style="color:#fef3c7;text-decoration:underline">WhatsApp '+CONTACT_PHONE+'</a>';
+        banner.innerHTML='⏳ Trial expires in <b>'+D.trialDaysLeft+' days</b>. Pay to continue — Contact: <a href="https://wa.me/91'+getContactPhone()+'" target="_blank" style="color:#fef3c7;text-decoration:underline">WhatsApp '+getContactPhone()+'</a>';
       } else {
         banner.style.display='none';
       }
@@ -2402,7 +2488,7 @@ function checkTrialStatus(){
 
 function showTrialExpiredModal(){
   // UPI QR via api.qrserver.com
-  const upiLink='upi://pay?pa='+PAYMENT_UPI+'&pn=Apna+Dukan&cu=INR';
+  const upiLink='upi://pay?pa='+getPaymentUPI()+'&pn=Apna+Dukan&cu=INR';
   const qrUrl='https://api.qrserver.com/v1/create-qr-code/?size=200x200&data='+encodeURIComponent(upiLink);
   const waMsg=encodeURIComponent('Hello, I have paid for Apna Dukan subscription. Please activate my account.\nEmail: '+currentUser.email);
 
@@ -2417,17 +2503,17 @@ function showTrialExpiredModal(){
   <div style="background:var(--bg2);border-radius:12px;padding:1rem;margin-bottom:1rem">
     <p style="font-size:12px;font-weight:600;margin-bottom:.625rem;color:var(--t2)">Scan to Pay via UPI</p>
     <img src="${qrUrl}" alt="UPI QR Code" style="width:180px;height:180px;border-radius:8px;border:2px solid var(--bdr)">
-    <p style="font-size:13px;font-weight:700;margin-top:.5rem;color:var(--acc)">${PAYMENT_UPI}</p>
+    <p style="font-size:13px;font-weight:700;margin-top:.5rem;color:var(--acc)">${getPaymentUPI()}</p>
   </div>
 
   <div style="background:var(--info-bg);border-radius:10px;padding:.875rem;margin-bottom:1rem;font-size:13px;color:var(--info-t);line-height:1.6">
     <p style="font-weight:600;margin-bottom:.25rem">After Payment:</p>
     <p>Send payment screenshot on WhatsApp to</p>
-    <p style="font-size:16px;font-weight:700">${CONTACT_PHONE}</p>
+    <p style="font-size:16px;font-weight:700">${getContactPhone()}</p>
     <p style="font-size:11px;margin-top:.25rem">Your account will be activated within 24 hours</p>
   </div>
 
-  <a href="https://wa.me/91${CONTACT_PHONE}?text=${waMsg}" target="_blank" style="text-decoration:none;display:block">
+  <a href="https://wa.me/91${getContactPhone()}?text=${waMsg}" target="_blank" style="text-decoration:none;display:block">
     <button style="width:100%;background:#25d366;color:#fff;border:none;padding:12px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:.75rem">
       📲 Send Receipt on WhatsApp
     </button>
@@ -2449,7 +2535,7 @@ function showBlockedModal(){
   <div style="font-size:40px;margin-bottom:.5rem">🚫</div>
   <h2 style="font-size:18px;font-weight:700;margin-bottom:.375rem">Account Blocked</h2>
   <p style="font-size:13px;color:var(--t2);margin-bottom:1.25rem">Your account has been blocked by admin.<br>Please contact us to resolve this.</p>
-  <a href="https://wa.me/91${CONTACT_PHONE}?text=${waMsg}" target="_blank" style="text-decoration:none;display:block">
+  <a href="https://wa.me/91${getContactPhone()}?text=${waMsg}" target="_blank" style="text-decoration:none;display:block">
     <button style="width:100%;background:#25d366;color:#fff;border:none;padding:12px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:.75rem">
       📲 Contact on WhatsApp
     </button>
@@ -2615,7 +2701,7 @@ async function delPurchase(id){
 
 function expPurchases(){
   const rows=[];
-  D.purchases.forEach(p=>(p.items||[]).forEach(i=>rows.push([new Date(p.date).toLocaleDateString('en-IN'),p.supplier||'',i.name,i.qty,fmtN(i.rate),fmtN(i.total),p.notes||''])));
+  D.purchases.forEach(p=>(p.items||[]).forEach(i=>rows.push([new Date(p.date).toLocaleDateString('en-IN'),p.supplier||'',i.name,i.qty,fmtN(i.rate),fmtN(i.total),safeText(p.notes||'')])));
   dlCSV(csv(['Date','Supplier','Product','Qty','Rate','Total','Notes'],rows),'purchases_'+new Date().toLocaleDateString('en-IN').replace(/\//g,'-')+'.csv');
 }
 
@@ -2710,7 +2796,7 @@ async function renderAdmin(){
         const bills=countMap[s.id]||0;
         const phone=s.settings?.phone||'';
         return '<tr>'
-          +'<td><b>'+(s.name||'-')+'</b><br><small style="color:var(--t2)">'+(s.gstin||'No GSTIN')+'</small></td>'
+          +'<td><b>'+(safeText(s.name)||'-')+'</b><br><small style="color:var(--t2)">'+(s.gstin||'No GSTIN')+'</small></td>'
           +'<td style="font-size:11px">'+(phone?'<a href="https://wa.me/91'+phone+'" target="_blank" style="color:var(--acc)">📲 '+phone+'</a>':'-')+'</td>'
           +'<td><span class="bdg '+(bills>0?'bg':'by')+'">'+bills+'</span></td>'
           +'<td style="font-size:11px">'+(s.created_at?new Date(s.created_at).toLocaleDateString('en-IN'):'-')+'</td>'
