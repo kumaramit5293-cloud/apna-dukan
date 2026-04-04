@@ -1278,12 +1278,27 @@ function renderBilling(){
         <select id="bpay"><option>Cash</option><option>UPI</option><option>Credit/Udhar</option><option>Credit Card</option><option>Cheque</option><option>Other</option></select>
       </div>
     </div>
-    <div class="fg"><label>Customer</label>
-      <div class="fr" style="gap:6px">
-        <select id="bcust" style="flex:1"><option value="">-- Walk-In Customer --</option>
-          ${D.customers.map(c=>`<option value="${c.id}">${c.name}${c.phone?' ('+c.phone+')':''}${+c.udhar>0?' [Due:'+fmt(c.udhar)+']':''}</option>`).join('')}
-        </select>
-        <button class="btn bts btp" onclick="openQuickCust()" style="flex-shrink:0" title="Add New Customer">+ Customer</button>
+    <div class="fg"><label>Customer Details <span style="font-size:11px;color:var(--t2);font-weight:400">(खाली रहे तो Walk-In)</span></label>
+      <div style="background:var(--bg2);border-radius:10px;padding:.75rem;border:1px solid var(--bdr)">
+        <div class="g2" style="margin-bottom:.5rem">
+          <div style="position:relative">
+            <input id="bc-name" placeholder="Name (type to search...)" autocomplete="off"
+              oninput="billCustAC(this.value,'bc-name','bc-phone','bc-gstin','bc-addr','bc-id')"
+              style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%">
+            <div id="bc-drop" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg1);border:1px solid var(--bdr2);border-radius:9px;z-index:200;max-height:180px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.12);margin-top:2px"></div>
+          </div>
+          <input id="bc-phone" placeholder="Mobile Number" type="tel" maxlength="10"
+            oninput="billCustAC(this.value,'bc-phone','bc-name','bc-gstin','bc-addr','bc-id')"
+            style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%">
+        </div>
+        <div class="g2">
+          <input id="bc-gstin" placeholder="GSTIN (optional)" maxlength="15"
+            style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%">
+          <input id="bc-addr" placeholder="Address (optional)"
+            style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%">
+        </div>
+        <input type="hidden" id="bc-id" value="">
+        <div id="bc-status" style="font-size:11px;color:var(--t2);margin-top:4px"></div>
       </div>
     </div>
   </div>
@@ -1549,9 +1564,9 @@ function updateLivePreview(){
   const bnum=document.getElementById('bnum')?.value||s.nextBill||1;
   const bdate=document.getElementById('bdate')?.value||new Date().toISOString().split('T')[0];
   const bpay=document.getElementById('bpay')?.value||'Cash';
-  const custId=document.getElementById('bcust')?.value||'';
-  const cust=custId?D.customers.find(c=>c.id===+custId):null;
-  const custName=cust?cust.name:'Walk-In';
+  const custId=document.getElementById('bc-id')?.value||'';
+  const custName=(document.getElementById('bc-name')?.value||'').trim()||
+    (custId?D.customers.find(c=>c.id===+custId)?.name:'')||'Walk-In';
   const sub=items.reduce((s,i)=>s+i.base,0),gt=items.reduce((s,i)=>s+i.gstAmt,0),grand=sub+gt;
   const ds=new Date(bdate).toLocaleDateString('en-IN');
   const roundOff=Math.round(grand)-grand;
@@ -1598,7 +1613,7 @@ function selHSN(code,gst,boxId,inpId,gstId){
   const g=document.getElementById(gstId);if(g)g.value=gst;
   const b=document.getElementById(boxId);if(b)b.style.display='none';
 }
-function clearBill(){D.billItems=[];renderBillItems();}
+function clearBill(){D.billItems=[];D._discAmt=0;D._discVal=0;clearBillCust();const dv=document.getElementById('disc-val');if(dv)dv.value=0;renderBillItems();const bp=document.getElementById('bpreview');if(bp)bp.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem 1rem;color:var(--t3);text-align:center"><p style="font-size:12px">Add items — preview will appear here</p></div>';}
 
 function rmItem(i){
   const item=D.billItems[i];
@@ -1623,8 +1638,24 @@ async function genBill(){
   const rawGrand=sub+gt;
   const discAmt=D._discAmt||0;
   const grand=parseFloat((rawGrand-discAmt).toFixed(2));
-  const cId=document.getElementById('bcust').value;
-  const cust=cId?D.customers.find(c=>c.id===+cId):null;
+  const cId=document.getElementById('bc-id').value;
+  let cust=cId?D.customers.find(c=>c.id===+cId):null;
+  // नया customer बनाएं अगर name/phone भरा है लेकिन existing नहीं
+  const bcName=(document.getElementById('bc-name').value||'').trim();
+  const bcPhone=(document.getElementById('bc-phone').value||'').trim();
+  if(!cust && (bcName||bcPhone)){
+    // auto-create customer
+    const newCust={id:Date.now(),name:bcName||'Walk-In',phone:bcPhone,
+      gstin:(document.getElementById('bc-gstin').value||'').trim(),
+      address:(document.getElementById('bc-addr').value||'').trim(),
+      totalPurchase:0,udhar:0};
+    D.customers.push(newCust);
+    cust=newCust;
+    try{await sb.from('customers').upsert({id:newCust.id,shop_id:currentShop.id,
+      name:newCust.name,phone:newCust.phone,gstin:newCust.gstin,
+      address:newCust.address,total_purchase:0,udhar:0});}
+    catch(e){}
+  }
   const payment=document.getElementById('bpay').value;
   const isUdhar=payment==='Credit/Udhar';
   const bill={id:billId,date:billDate,customer:cust?cust.name:'Walk-In',custId:cId||null,custGstin:cust?.gstin||'',custAddr:cust?.address||'',items:[...items],subtotal:sub,gstTotal:gt,grand,discAmt,discVal:D._discVal||0,discType:D._discType||'pct',payment};
@@ -1640,8 +1671,14 @@ async function genBill(){
     toast('Bill saved ✓');
   }catch(e){toast('Saved locally — sync pending','warn')}
   D.billItems=[];D._discAmt=0;D._discVal=0;
+  clearBillCust();
   const dv=document.getElementById('disc-val');if(dv)dv.value=0;
   renderBillItems();showPreview(bill);
+  // सभी related tabs refresh करें
+  renderDash();
+  renderUdhar();
+  renderBillsTab();
+  renderCust();
 }
 
 function showPreview(bill){
@@ -1918,30 +1955,148 @@ async function delProd(id){if(!confirm('Delete this product?'))return;D.products
 // ── CUSTOMERS ──
 function renderCust(){
   const el=document.getElementById('tab-customers');if(!el)return;
-  el.innerHTML=`<div class="card"><div class="ct">Add Customer</div>
-  <div class="g3">
-    <div class="fg"><label>Name *</label><input id="cn" placeholder="Full Name"></div>
-    <div class="fg"><label>Mobile</label><input id="cp" placeholder="10 digits"></div>
-    <div class="fg"><label>GSTIN</label><input id="cg" placeholder="15 digits"></div>
+  el.innerHTML=`<div class="card"><div class="ct">Add / Find Customer</div>
+  <div class="g2" style="margin-bottom:.5rem">
+    <div style="position:relative">
+      <label style="font-size:12px;font-weight:500;color:var(--t2);display:block;margin-bottom:4px">Name *</label>
+      <input id="cn" placeholder="Type name — existing customers नीचे दिखेंगे" autocomplete="off"
+        oninput="custNameAC(this.value)"
+        style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%">
+      <div id="cn-drop" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg1);border:1px solid var(--bdr2);border-radius:9px;z-index:200;max-height:160px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.12);margin-top:2px"></div>
+    </div>
+    <div>
+      <label style="font-size:12px;font-weight:500;color:var(--t2);display:block;margin-bottom:4px">Mobile</label>
+      <input id="cp" type="tel" maxlength="10" placeholder="Mobile Number" autocomplete="off"
+        oninput="custPhoneAC(this.value)"
+        style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%">
+    </div>
   </div>
-  <div class="fg" style="margin-bottom:.875rem"><label>Address</label><input id="ca" placeholder="Full Address"></div>
+  <div class="g2" style="margin-bottom:.75rem">
+    <div><label style="font-size:12px;font-weight:500;color:var(--t2);display:block;margin-bottom:4px">GSTIN</label>
+      <input id="cg" placeholder="15-digit GSTIN" style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%"></div>
+    <div><label style="font-size:12px;font-weight:500;color:var(--t2);display:block;margin-bottom:4px">Address</label>
+      <input id="ca" placeholder="Full Address" style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%"></div>
+  </div>
+  <div id="cust-dup-warn" style="display:none;background:var(--warn-bg);color:var(--warn-t);padding:.5rem .75rem;border-radius:8px;font-size:12px;margin-bottom:.5rem"></div>
   <button class="btn btp" onclick="addCust()">+ Add Customer</button></div>
   <div class="card"><div class="ct">Customers (${D.customers.length})</div>
   <table><thead><tr><th>Name</th><th>Mobile</th><th>GSTIN</th><th>Total Purchase</th><th>Outstanding</th><th></th></tr></thead>
   <tbody>${D.customers.length?D.customers.map(c=>`<tr><td><b>${c.name}</b></td><td>${c.phone||'-'}</td><td>${c.gstin||'-'}</td><td>${fmt(c.totalPurchase||0)}</td><td>${+c.udhar>0?`<span class="udhar-amt">${fmt(c.udhar)}</span> <button class="btn bts btp" onclick="openUdharPayModal(${c.id})">Collect</button>`:'<span style="color:var(--ok-t)">✓ Clear</span>'}</td><td style="white-space:nowrap"><button class="btn bts" onclick="openCustStmt(${c.id})" title="Statement">📋</button> <button class="btn bts btd" onclick="delCust(${c.id})">✕</button></td></tr>`).join(''):'<tr><td colspan="6" style="text-align:center;padding:1.25rem;color:var(--t2)">No customers added</td></tr>'}</tbody>
   </table></div>`;
 }
+// ── CUSTOMER PAGE AUTOCOMPLETE ──
+function custNameAC(v){
+  const q=(v||'').toLowerCase().trim();
+  const drop=document.getElementById('cn-drop');
+  const warn=document.getElementById('cust-dup-warn');
+  if(!drop) return;
+  if(!q||q.length<1){drop.style.display='none';if(warn)warn.style.display='none';return;}
+  const matches=D.customers.filter(c=>(c.name||'').toLowerCase().includes(q)).slice(0,5);
+  // Exact match warning
+  const exact=D.customers.find(c=>c.name.toLowerCase()===q);
+  if(warn){
+    if(exact){warn.style.display='block';warn.innerHTML='⚠️ इस नाम से पहले से customer है: <b>'+exact.name+'</b>'+(exact.phone?' ('+exact.phone+')':'');}
+    else warn.style.display='none';
+  }
+  if(!matches.length){drop.style.display='none';return;}
+  drop.style.display='block';
+  drop.innerHTML=matches.map(c=>`<div onclick="custFillFields(${c.id})" style="padding:8px 12px;cursor:pointer;border-bottom:.5px solid var(--bdr);font-size:13px"><b>${c.name}</b><span style="font-size:11px;color:var(--t2);margin-left:6px">${c.phone||''}${c.gstin?' | '+c.gstin:''}</span></div>`).join('');
+}
+
+function custPhoneAC(v){
+  const q=(v||'').trim();
+  if(!q||q.length<3) return;
+  const matches=D.customers.filter(c=>(c.phone||'').includes(q)).slice(0,5);
+  if(!matches.length) return;
+  const drop=document.getElementById('cn-drop');
+  if(!drop) return;
+  drop.style.display='block';
+  drop.innerHTML=matches.map(c=>`<div onclick="custFillFields(${c.id})" style="padding:8px 12px;cursor:pointer;border-bottom:.5px solid var(--bdr);font-size:13px"><b>${c.name}</b><span style="font-size:11px;color:var(--t2);margin-left:6px">${c.phone||''}</span></div>`).join('');
+}
+
+function custFillFields(custId){
+  const c=D.customers.find(x=>x.id===custId);if(!c)return;
+  const cn=document.getElementById('cn');const cp=document.getElementById('cp');
+  const cg=document.getElementById('cg');const ca=document.getElementById('ca');
+  if(cn)cn.value=c.name;if(cp)cp.value=c.phone||'';
+  if(cg)cg.value=c.gstin||'';if(ca)ca.value=c.address||'';
+  const drop=document.getElementById('cn-drop');if(drop)drop.style.display='none';
+  const warn=document.getElementById('cust-dup-warn');
+  if(warn){warn.style.display='block';warn.innerHTML='✓ Existing customer loaded — edit करें या नया बनाएं';}
+}
+
 async function addCust(){
-  const n=document.getElementById('cn').value.trim();if(!n){alert('Name is required');return}
-  const c={id:Date.now(),name:n,phone:document.getElementById('cp').value,gstin:document.getElementById('cg').value,address:document.getElementById('ca').value,totalPurchase:0,udhar:0};
+  const n=document.getElementById('cn').value.trim();if(!n){alert('Name required');return}
+  const ph=document.getElementById('cp').value.trim();
+  // Duplicate check
+  const dup=D.customers.find(c=>c.name.toLowerCase()===n.toLowerCase()||(ph&&c.phone===ph));
+  if(dup&&!confirm('इस नाम/नंबर से पहले से customer है: '+dup.name+'. फिर भी नया बनाएं?'))return;
+  const c={id:Date.now(),name:n,phone:ph,
+    gstin:document.getElementById('cg').value.trim(),
+    address:document.getElementById('ca').value.trim(),
+    totalPurchase:0,udhar:0};
   D.customers.push(c);saveLocal();
   try{await sb.from('customers').upsert({id:c.id,shop_id:currentShop.id,name:c.name,phone:c.phone,gstin:c.gstin,address:c.address,total_purchase:0,udhar:0});toast('Customer saved ✓')}
   catch(e){toast('Saved locally','warn')}
+  // Form clear
+  ['cn','cp','cg','ca'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  const w=document.getElementById('cust-dup-warn');if(w)w.style.display='none';
   renderCust();
 }
 async function delCust(id){if(!confirm('Delete this customer?'))return;D.customers=D.customers.filter(c=>c.id!==id);saveLocal();try{await sb.from('customers').delete().eq('id',id)}catch(e){}renderCust()}
 
 // ── QUICK ADD CUSTOMER (billing page) ──
+// ── BILLING CUSTOMER AUTOCOMPLETE ──
+function billCustAC(v, selfId, otherNameId, gstinId, addrId, hiddenId){
+  const q=(v||'').toLowerCase().trim();
+  const drop=document.getElementById('bc-drop');
+  if(!drop) return;
+  if(!q || q.length < 1){ drop.style.display='none'; return; }
+
+  // Name या Phone दोनों से search करें
+  const selfEl=document.getElementById(selfId);
+  const isPhone=selfId==='bc-phone';
+  const matches=D.customers.filter(c=>
+    isPhone
+      ? (c.phone||'').toLowerCase().includes(q)
+      : (c.name||'').toLowerCase().includes(q) || (c.phone||'').includes(q)
+  ).slice(0,6);
+
+  if(!matches.length){ drop.style.display='none'; return; }
+
+  drop.style.display='block';
+  drop.innerHTML=matches.map(c=>`
+    <div class="ac-item" onclick="billCustSelect(${c.id})" style="padding:8px 12px;cursor:pointer;border-bottom:.5px solid var(--bdr)">
+      <div style="font-weight:500;font-size:13px">${c.name}</div>
+      <div style="font-size:11px;color:var(--t2)">${c.phone||''}${c.gstin?' | '+c.gstin:''}${+c.udhar>0?' | <span style="color:var(--err-t)">Due: ₹'+fmtN(c.udhar)+'</span>':''}</div>
+    </div>`).join('');
+}
+
+function billCustSelect(custId){
+  const c=D.customers.find(x=>x.id===custId);
+  if(!c) return;
+  const nameEl=document.getElementById('bc-name');
+  const phoneEl=document.getElementById('bc-phone');
+  const gstinEl=document.getElementById('bc-gstin');
+  const addrEl=document.getElementById('bc-addr');
+  const hiddenEl=document.getElementById('bc-id');
+  const statusEl=document.getElementById('bc-status');
+  if(nameEl) nameEl.value=c.name;
+  if(phoneEl) phoneEl.value=c.phone||'';
+  if(gstinEl) gstinEl.value=c.gstin||'';
+  if(addrEl) addrEl.value=c.address||'';
+  if(hiddenEl) hiddenEl.value=c.id;
+  if(statusEl) statusEl.innerHTML=`<span style="color:var(--ok-t)">✓ Existing customer selected${+c.udhar>0?' — <span style="color:var(--err-t)">Outstanding: ₹'+fmtN(c.udhar)+'</span>':''}</span>`;
+  document.getElementById('bc-drop').style.display='none';
+}
+
+function clearBillCust(){
+  ['bc-name','bc-phone','bc-gstin','bc-addr'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  const h=document.getElementById('bc-id');if(h)h.value='';
+  const s=document.getElementById('bc-status');if(s)s.innerHTML='';
+  const d=document.getElementById('bc-drop');if(d)d.style.display='none';
+}
+
 function openQuickCust(){
   document.getElementById('modal-root').innerHTML=`
 <div class="modal-wrap" onclick="if(event.target===this)closeModal()">
@@ -1964,11 +2119,11 @@ async function quickSaveCust(){
   try{await sb.from('customers').upsert({id:c.id,shop_id:currentShop.id,name:c.name,phone:c.phone,gstin:c.gstin,address:'',total_purchase:0,udhar:0});toast('Customer added ✓')}
   catch(e){toast('Saved locally','warn')}
   closeModal();
-  const sel=document.getElementById('bcust');
-  if(sel){
-    const opt=document.createElement('option');opt.value=c.id;opt.textContent=c.name+(c.phone?' ('+c.phone+')':'');
-    sel.appendChild(opt);sel.value=c.id;
-  }
+  closeModal();
+  billCustSelect(c.id);
+
+
+
 }
 function openCustStmt(custId){
   const cust=D.customers.find(x=>x.id===+custId);if(!cust)return;
@@ -2206,14 +2361,34 @@ async function saveUdharPay(custId){
 function renderBillsTab(){
   const el=document.getElementById('tab-bills');if(!el)return;
   el.innerHTML=`<div class="card">
-  <div class="fr" style="justify-content:space-between;margin-bottom:.875rem">
+  <div class="fr" style="justify-content:space-between;margin-bottom:.875rem;flex-wrap:wrap;gap:8px">
     <div class="ct" style="margin:0">Bill History (${D.bills.length})</div>
-    <button class="btn bto bts" onclick="expBills()">📊 Excel</button>
+    <div class="fr" style="gap:6px">
+      <input id="bill-search" placeholder="🔍 Customer / Bill No. / Amount..." style="font-size:12px;padding:6px 10px;border-radius:8px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:220px" oninput="filterBills(this.value)">
+      <button class="btn bto bts" onclick="expBills()">📊 Excel</button>
+    </div>
   </div>
   <div style="overflow-x:auto">
   <table><thead><tr><th>Bill No.</th><th>Date</th><th>Customer</th><th>Taxable</th><th>GST</th><th>Total</th><th>Payment</th><th></th></tr></thead>
-  <tbody>${D.bills.length?D.bills.map(b=>`<tr><td><b>${billNo(b.id)}</b></td><td>${new Date(b.date).toLocaleDateString('en-IN')}</td><td>${safeText(b.customer)}</td><td>${fmt(b.subtotal)}</td><td>${fmt(b.gstTotal)}</td><td>${fmt(b.grand)}</td><td><span class="bdg bb">${b.payment}</span></td><td style="white-space:nowrap"><button class="btn bts" onclick="openViewBill(${b.id})">👁</button> <button class="btn bts" onclick="openEditBill(${b.id})">✏️</button> <button class="btn bts btd" onclick="delBill(${b.id})">✕</button></td></tr>`).join(''):'<tr><td colspan="8" style="text-align:center;padding:1.25rem;color:var(--t2)">No bills found</td></tr>'}</tbody>
+  <tbody id="bills-tbody">${billRows(D.bills)}</tbody>
   </table></div></div>`;
+}
+function billRows(list){
+  if(!list.length) return '<tr><td colspan="8" style="text-align:center;padding:1.25rem;color:var(--t2)">No bills found</td></tr>';
+  return list.map(b=>`<tr><td><b>${billNo(b.id)}</b></td><td>${new Date(b.date).toLocaleDateString('en-IN')}</td><td>${safeText(b.customer)}</td><td>${fmt(b.subtotal)}</td><td>${fmt(b.gstTotal)}</td><td>${fmt(b.grand)}</td><td><span class="bdg bb">${b.payment}</span></td><td style="white-space:nowrap"><button class="btn bts" onclick="openViewBill(${b.id})">👁</button> <button class="btn bts" onclick="openEditBill(${b.id})">✏️</button> <button class="btn bts btd" onclick="delBill(${b.id})">✕</button></td></tr>`).join('');
+}
+function filterBills(v){
+  const q=v.toLowerCase().trim();
+  const el=document.getElementById('bills-tbody');if(!el)return;
+  if(!q){el.innerHTML=billRows(D.bills);return;}
+  const fl=D.bills.filter(b=>
+    b.customer.toLowerCase().includes(q)||
+    String(b.id).includes(q)||
+    billNo(b.id).toLowerCase().includes(q)||
+    String(b.grand).includes(q)||
+    b.payment.toLowerCase().includes(q)
+  );
+  el.innerHTML=billRows(fl);
 }
 function viewBill(id){const b=D.bills.find(x=>x.id===id);if(!b)return;sw('billing');setTimeout(()=>showPreview(b),80)}
 function openViewBill(id){viewBill(id)}
@@ -2708,18 +2883,22 @@ async function savePurchase(){
     items,total:grand,
     notes:document.getElementById('pur-notes').value.trim()
   };
-  // Update stock
+  // Update stock — inventory में जोड़ें
   items.forEach(({name,qty})=>{
     const p=D.products.find(x=>x.name.toLowerCase()===name.toLowerCase());
-    if(p){p.stock=(+p.stock||0)+qty;sb.from('products').update({stock:p.stock}).eq('id',p.id).catch(()=>{});}
+    if(p){
+      p.stock=(+p.stock||0)+qty;
+      sb.from('products').update({stock:p.stock}).eq('id',p.id).catch(()=>{});
+    }
   });
   D.purchases.unshift(pur);
   saveLocal();
   try{
     await sb.from('purchases').insert({id:pur.id,shop_id:currentShop.id,date:pur.date,supplier:pur.supplier,items:pur.items,total:pur.total,notes:pur.notes});
-    toast('Purchase saved ✓');
-  }catch(e){toast('Saved locally','warn')}
+    toast('Purchase saved ✓ — Inventory updated');
+  }catch(e){toast('Saved locally — sync pending','warn')}
   renderPurchase();
+  renderInv(); // inventory tab refresh करें
 }
 
 async function delPurchase(id){
@@ -2890,6 +3069,16 @@ async function adminToggleBlock(btn){
     toast('Error: '+e.message,'err');
   }
 }
+
+// ── Close dropdowns on outside click ──
+document.addEventListener('click',function(e){
+  if(!e.target.closest('#bc-name') && !e.target.closest('#bc-phone') && !e.target.closest('#bc-drop')){
+    const d=document.getElementById('bc-drop');if(d)d.style.display='none';
+  }
+  if(!e.target.closest('#cn') && !e.target.closest('#cn-drop')){
+    const d=document.getElementById('cn-drop');if(d)d.style.display='none';
+  }
+});
 
 initApp();
 </script>
