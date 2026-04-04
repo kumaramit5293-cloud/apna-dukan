@@ -2783,11 +2783,26 @@ function renderPurchase(){
   <div class="ct" style="margin-bottom:.5rem;font-size:12px">Items</div>
   <div id="pur-items-wrap">
     <div class="pur-item-row" style="display:grid;grid-template-columns:2fr 70px 90px 75px 28px;gap:6px;margin-bottom:6px;align-items:end">
-      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Product</label><input class="pi-name" placeholder="Product name" oninput="purProdAC(this)"></div>
-      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Qty</label><input class="pi-qty" type="number" value="1" min="1"></div>
-      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Rate (₹)</label><input class="pi-rate" type="number" placeholder="0"></div>
-      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Total</label><input class="pi-total" type="number" placeholder="0" style="background:var(--accl);border-color:var(--acc)" readonly></div>
-      <div class="fg" style="margin:0"><label style="font-size:11px">&nbsp;</label><button class="btn btd bts" onclick="this.closest('.pur-item-row').remove();purCalcTotal()" style="padding:9px 8px">✕</button></div>
+      <div class="fg" style="margin:0;position:relative">
+        <label style="font-size:11px;color:var(--t2)">Product (type to search...)</label>
+        <input class="pi-name" placeholder="Product name..." oninput="purProdAC(this)" autocomplete="off"
+          style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%">
+      </div>
+      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Qty</label>
+        <input class="pi-qty" type="number" value="1" min="1" oninput="purCalcTotal()"
+          style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%">
+      </div>
+      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Rate ₹</label>
+        <input class="pi-rate" type="number" placeholder="0" oninput="purCalcTotal()"
+          style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%">
+      </div>
+      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Total</label>
+        <input class="pi-total" type="number" placeholder="0" readonly
+          style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--acc);background:var(--accl);color:var(--t1);width:100%">
+      </div>
+      <div class="fg" style="margin:0"><label style="font-size:11px">&nbsp;</label>
+        <button class="btn btd bts" onclick="this.closest('.pur-item-row').remove();purCalcTotal()" style="padding:9px 8px">✕</button>
+      </div>
     </div>
   </div>
   <div class="fr" style="margin-bottom:.875rem">
@@ -2829,7 +2844,10 @@ function addPurRow(){
   row.className='pur-item-row';
   row.style.cssText='display:grid;grid-template-columns:2fr 70px 90px 75px 28px;gap:6px;margin-bottom:6px;align-items:end';
   row.innerHTML=`
-    <div class="fg" style="margin:0"><input class="pi-name" placeholder="Product name" style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%"></div>
+    <div class="fg" style="margin:0;position:relative">
+      <input class="pi-name" placeholder="Product name..." oninput="purProdAC(this)" autocomplete="off"
+        style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%">
+    </div>
     <div class="fg" style="margin:0"><input class="pi-qty" type="number" value="1" min="1" oninput="purCalcTotal()" style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%"></div>
     <div class="fg" style="margin:0"><input class="pi-rate" type="number" placeholder="0" oninput="purCalcTotal()" style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%"></div>
     <div class="fg" style="margin:0"><input class="pi-total" type="number" placeholder="0" readonly style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--acc);background:var(--accl);color:var(--t1);width:100%"></div>
@@ -2852,17 +2870,57 @@ function purCalcTotal(){
 }
 
 function purProdAC(inp){
-  const v=inp.value.toLowerCase();
-  if(!v)return;
-  const match=D.products.find(p=>p.name.toLowerCase().startsWith(v));
-  if(match){
-    const row=inp.closest('.pur-item-row');
-    if(row){
-      const rateInp=row.querySelector('.pi-rate');
-      if(rateInp&&!rateInp.value)rateInp.value=match.buyPrice||'';
-      purCalcTotal();
-    }
+  const v=(inp.value||'').toLowerCase().trim();
+  const row=inp.closest('.pur-item-row');
+  if(!row)return;
+  // Dropdown container — row के अंदर बनाएं
+  let drop=row.querySelector('.pur-ac-drop');
+  if(!drop){
+    drop=document.createElement('div');
+    drop.className='pur-ac-drop';
+    drop.style.cssText='position:absolute;top:100%;left:0;right:0;background:var(--bg1);border:1px solid var(--bdr2);border-radius:9px;z-index:300;max-height:200px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.15);margin-top:2px';
+    const nameWrap=inp.parentElement;
+    nameWrap.style.position='relative';
+    nameWrap.appendChild(drop);
   }
+  if(!v){drop.style.display='none';return;}
+  const matches=D.products.filter(p=>p.name.toLowerCase().includes(v)).slice(0,8);
+  if(!matches.length){
+    // नया product hint दिखाएं
+    drop.style.display='block';
+    drop.innerHTML=`<div style="padding:8px 12px;font-size:12px;color:var(--t2)">
+      "नया product" — Save करने पर Inventory में add होगा
+    </div>`;
+    return;
+  }
+  drop.style.display='block';
+  drop.innerHTML=matches.map(p=>`
+    <div onclick="purProdSelect(this.closest('.pur-item-row'),'${p.id}')"
+      style="padding:8px 12px;cursor:pointer;border-bottom:.5px solid var(--bdr);font-size:13px"
+      onmouseover="this.style.background='var(--accl)'" onmouseout="this.style.background=''">
+      <span style="font-weight:500">${p.name}</span>
+      <span style="font-size:11px;color:var(--t2);margin-left:6px">
+        Buy:₹${p.buyPrice||0} | Stock:${p.stock||0} ${p.unit||''}
+      </span>
+    </div>`).join('');
+}
+
+function purProdSelect(row, prodId){
+  const p=D.products.find(x=>x.id===+prodId);
+  if(!p||!row)return;
+  const nameInp=row.querySelector('.pi-name');
+  const rateInp=row.querySelector('.pi-rate');
+  const qtyInp=row.querySelector('.pi-qty');
+  if(nameInp)nameInp.value=p.name;
+  if(rateInp)rateInp.value=p.buyPrice||'';
+  // data attribute में product id store करें
+  row.dataset.prodId=p.id;
+  purCalcTotal();
+  // dropdown बंद करें
+  const drop=row.querySelector('.pur-ac-drop');
+  if(drop)drop.style.display='none';
+  // qty पर focus करें
+  if(qtyInp){qtyInp.focus();qtyInp.select();}
 }
 
 async function savePurchase(){
@@ -2871,34 +2929,107 @@ async function savePurchase(){
     name:(row.querySelector('.pi-name')?.value||'').trim(),
     qty:+row.querySelector('.pi-qty')?.value||0,
     rate:+row.querySelector('.pi-rate')?.value||0,
-    total:+row.querySelector('.pi-total')?.value||0
-  })).filter(i=>i.name&&i.qty&&i.rate);
-  if(!items.length){alert('Add at least one item');return}
+    total:+row.querySelector('.pi-total')?.value||0,
+    prodId:row.dataset.prodId||null  // selected existing product id
+  })).filter(i=>i.name&&i.qty>0&&i.rate>0);
+  if(!items.length){alert('कम से कम एक item भरें (Name + Qty + Rate)');return}
+
   const grand=items.reduce((s,i)=>s+i.total,0);
   const pur={
     id:'pur_'+Date.now(),
     date:new Date(document.getElementById('pur-date').value).toISOString(),
     supplier:document.getElementById('pur-sup').value.trim()||'Unknown',
     invNo:document.getElementById('pur-inv').value.trim(),
-    items,total:grand,
+    items:items.map(i=>({name:i.name,qty:i.qty,rate:i.rate,total:i.total})),
+    total:grand,
     notes:document.getElementById('pur-notes').value.trim()
   };
-  // Update stock — inventory में जोड़ें
-  items.forEach(({name,qty})=>{
-    const p=D.products.find(x=>x.name.toLowerCase()===name.toLowerCase());
+
+  // ── Inventory update: existing product → stock बढ़ाएं, नया → create करें ──
+  for(const item of items){
+    let p = item.prodId
+      ? D.products.find(x=>x.id===+item.prodId)
+      : D.products.find(x=>x.name.toLowerCase()===item.name.toLowerCase());
+
     if(p){
-      p.stock=(+p.stock||0)+qty;
-      sb.from('products').update({stock:p.stock}).eq('id',p.id).catch(()=>{});
+      // Existing product — stock बढ़ाएं
+      p.stock=(+p.stock||0)+item.qty;
+      p.buyPrice=item.rate; // latest purchase rate update करें
+      try{await sb.from('products').update({stock:p.stock,buy_price:p.buyPrice}).eq('id',p.id);}
+      catch(e){}
+    } else {
+      // नया product — inventory में add करें
+      const newProd={
+        id:Date.now()+Math.floor(Math.random()*1000),
+        name:item.name,
+        barcode:'',hsn:'',
+        gst:0,
+        buyPrice:item.rate,
+        sellPrice:Math.round(item.rate*1.2), // 20% margin default
+        stock:item.qty,
+        minStock:5,
+        unit:'Pcs'
+      };
+      D.products.push(newProd);
+      try{
+        await sb.from('products').upsert({
+          id:newProd.id,shop_id:currentShop.id,
+          name:newProd.name,barcode:'',hsn:'',gst:0,
+          buy_price:newProd.buyPrice,sell_price:newProd.sellPrice,
+          stock:newProd.stock,min_stock:newProd.minStock,unit:newProd.unit
+        });
+      }catch(e){}
+      toast(item.name+' — Inventory में add हुआ ✓');
     }
-  });
+  }
+
   D.purchases.unshift(pur);
   saveLocal();
+
   try{
-    await sb.from('purchases').insert({id:pur.id,shop_id:currentShop.id,date:pur.date,supplier:pur.supplier,items:pur.items,total:pur.total,notes:pur.notes});
+    await sb.from('purchases').insert({
+      id:pur.id,shop_id:currentShop.id,
+      date:pur.date,supplier:pur.supplier,
+      items:pur.items,total:pur.total,notes:pur.notes
+    });
     toast('Purchase saved ✓ — Inventory updated');
-  }catch(e){toast('Saved locally — sync pending','warn')}
+  }catch(e){
+    toast('Locally saved — sync pending','warn');
+    console.log('Purchase save error:',e.message);
+  }
+
+  // Form reset
+  document.getElementById('pur-sup').value='';
+  document.getElementById('pur-inv').value='';
+  document.getElementById('pur-notes').value='';
+  document.getElementById('pur-items-wrap').innerHTML=`
+    <div class="pur-item-row" style="display:grid;grid-template-columns:2fr 70px 90px 75px 28px;gap:6px;margin-bottom:6px;align-items:end">
+      <div class="fg" style="margin:0;position:relative"><label style="font-size:11px;color:var(--t2)">Product</label>
+        <input class="pi-name" placeholder="Product name..." oninput="purProdAC(this)"
+          style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%">
+      </div>
+      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Qty</label>
+        <input class="pi-qty" type="number" value="1" min="1" oninput="purCalcTotal()"
+          style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%">
+      </div>
+      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Rate ₹</label>
+        <input class="pi-rate" type="number" placeholder="0" oninput="purCalcTotal()"
+          style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%">
+      </div>
+      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Total</label>
+        <input class="pi-total" type="number" placeholder="0" readonly
+          style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--acc);background:var(--accl);color:var(--t1);width:100%">
+      </div>
+      <div class="fg" style="margin:0"><label style="font-size:11px">&nbsp;</label>
+        <button class="btn btd bts" onclick="this.closest('.pur-item-row').remove();purCalcTotal()" style="padding:9px 8px">✕</button>
+      </div>
+    </div>`;
+  document.querySelectorAll('.pi-qty,.pi-rate').forEach(i=>i.addEventListener('input',purCalcTotal));
+  document.getElementById('pur-grand').textContent='₹0.00';
+
   renderPurchase();
-  renderInv(); // inventory tab refresh करें
+  renderInv();
+  renderBilling(); // billing में नया product दिखे
 }
 
 async function delPurchase(id){
@@ -3072,6 +3203,10 @@ async function adminToggleBlock(btn){
 
 // ── Close dropdowns on outside click ──
 document.addEventListener('click',function(e){
+  // Purchase product dropdowns close करें
+  if(!e.target.closest('.pi-name') && !e.target.closest('.pur-ac-drop')){
+    document.querySelectorAll('.pur-ac-drop').forEach(d=>d.style.display='none');
+  }
   if(!e.target.closest('#bc-name') && !e.target.closest('#bc-phone') && !e.target.closest('#bc-drop')){
     const d=document.getElementById('bc-drop');if(d)d.style.display='none';
   }
