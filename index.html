@@ -1454,7 +1454,7 @@ function addItem(){
     // अगर rate बदला है तो inventory में update करें
     if(existing.sellPrice!==parseFloat(rate.toFixed(2))){
       existing.sellPrice=parseFloat(rate.toFixed(2));
-      sb.from('products').update({sell_price:existing.sellPrice}).eq('id',existing.id).then(()=>{}).catch(()=>{});
+      sb.from('products').update({sell_price:existing.sellPrice}).eq('id',existing.id).catch(()=>{});
     }
   }
   else{
@@ -1623,7 +1623,7 @@ function rmItem(i){
     if(!usedElsewhere){
       D.products=D.products.filter(p=>p.id!==item.pId);
       D._autoAddedPIds.delete(item.pId);
-      sb.from('products').delete().eq('id',item.pId).then(()=>{}).catch(()=>{});
+      sb.from('products').delete().eq('id',item.pId).catch(()=>{});
     }
   }
   D.billItems.splice(i,1);renderBillItems();
@@ -2782,11 +2782,12 @@ function renderPurchase(){
   </div>
   <div class="ct" style="margin-bottom:.5rem;font-size:12px">Items</div>
   <div id="pur-items-wrap">
-    <div class="pur-item-row" style="display:grid;grid-template-columns:2fr 70px 90px 75px 28px;gap:6px;margin-bottom:6px;align-items:end">
-      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Product</label><input class="pi-name" placeholder="Product name" oninput="purProdAC(this)"></div>
-      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Qty</label><input class="pi-qty" type="number" value="1" min="1"></div>
-      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Rate (₹)</label><input class="pi-rate" type="number" placeholder="0"></div>
-      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Total</label><input class="pi-total" type="number" placeholder="0" style="background:var(--accl);border-color:var(--acc)" readonly></div>
+    <div class="pur-item-row" style="display:grid;grid-template-columns:2fr 60px 85px 58px 85px 28px;gap:5px;margin-bottom:6px;align-items:end">
+      <div class="fg" style="margin:0;position:relative"><label style="font-size:11px;color:var(--t2)">Product</label><input class="pi-name" placeholder="Product name" oninput="purProdAC(this)" autocomplete="off"></div>
+      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Qty</label><input class="pi-qty" type="number" value="1" min="1" oninput="purCalcTotal()"></div>
+      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">Rate ₹ (excl.GST)</label><input class="pi-rate" type="number" placeholder="0" oninput="purCalcTotal()"></div>
+      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2)">GST %</label><select class="pi-gst" onchange="purCalcTotal()" style="font-size:12px;padding:7px 4px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%"><option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18" selected>18%</option><option value="28">28%</option></select></div>
+      <div class="fg" style="margin:0"><label style="font-size:11px;color:var(--t2);font-weight:600;color:var(--acc)">Total (incl.GST)</label><input class="pi-total" type="number" placeholder="0" style="background:var(--accl);border-color:var(--acc)" readonly></div>
       <div class="fg" style="margin:0"><label style="font-size:11px">&nbsp;</label><button class="btn btd bts" onclick="this.closest('.pur-item-row').remove();purCalcTotal()" style="padding:9px 8px">✕</button></div>
     </div>
   </div>
@@ -2795,8 +2796,9 @@ function renderPurchase(){
   </div>
   <div class="g2" style="margin-bottom:.875rem">
     <div class="fg"><label>Notes</label><input id="pur-notes" placeholder="Optional notes"></div>
-    <div class="fg"><label>Grand Total</label>
+    <div class="fg"><label>Grand Total (incl. GST)</label>
       <div style="padding:10px 12px;background:var(--err-bg);border-radius:9px;font-size:16px;font-weight:700;color:var(--err-t)" id="pur-grand">₹0.00</div>
+      <div id="pur-gst-summary" style="display:none;margin-top:4px;padding:4px 8px;background:var(--bg2);border-radius:6px"></div>
     </div>
   </div>
   <button class="btn btp" onclick="savePurchase()">✓ Save Purchase</button>
@@ -2808,15 +2810,17 @@ function renderPurchase(){
     <button class="btn bto bts" onclick="expPurchases()">📊 Excel</button>
   </div>
   <div style="overflow-x:auto">
-  <table><thead><tr><th>Date</th><th>Supplier</th><th>Items</th><th>Total</th><th>Notes</th><th></th></tr></thead>
+  <table><thead><tr><th>Date</th><th>Supplier</th><th>Items</th><th>Taxable</th><th>GST</th><th>Total</th><th>Notes</th><th></th></tr></thead>
   <tbody>${D.purchases.length?D.purchases.map(p=>`<tr>
     <td>${new Date(p.date).toLocaleDateString('en-IN')}</td>
     <td><b>${p.supplier||'-'}</b></td>
-    <td>${(p.items||[]).map(i=>i.name+' x'+i.qty).join(', ')}</td>
+    <td style="font-size:11px">${(p.items||[]).map(i=>i.name+' x'+i.qty+(i.gst?'('+i.gst+'%)':'')).join(', ')}</td>
+    <td style="font-size:12px">${fmt(p.taxable||p.items?.reduce((s,i)=>s+(i.base||0),0)||0)}</td>
+    <td style="font-size:12px;color:var(--warn-t)">${fmt(p.gstTotal||p.items?.reduce((s,i)=>s+(i.gstAmt||0),0)||0)}</td>
     <td><span class="udhar-amt">${fmt(p.total)}</span></td>
     <td style="font-size:11px;color:var(--t2)">${p.notes||'-'}</td>
     <td><button class="btn bts btd" onclick="delPurchase('${p.id}')">🗑️</button></td>
-  </tr>`).join(''):'<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:var(--t2)">No purchase entries yet</td></tr>'}</tbody>
+  </tr>`).join(''):'<tr><td colspan="8" style="text-align:center;padding:1.5rem;color:var(--t2)">No purchase entries yet</td></tr>'}</tbody>
   </table></div>
 </div>`;
   // Bind live total calc on ALL rows (first row + any dynamic)
@@ -2832,11 +2836,12 @@ function addPurRow(){
   const wrap=document.getElementById('pur-items-wrap');
   const row=document.createElement('div');
   row.className='pur-item-row';
-  row.style.cssText='display:grid;grid-template-columns:2fr 70px 90px 75px 28px;gap:6px;margin-bottom:6px;align-items:end';
+  row.style.cssText='display:grid;grid-template-columns:2fr 60px 85px 58px 85px 28px;gap:5px;margin-bottom:6px;align-items:end';
   row.innerHTML=`
-    <div class="fg" style="margin:0"><input class="pi-name" placeholder="Product name" style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%"></div>
+    <div class="fg" style="margin:0;position:relative"><input class="pi-name" placeholder="Product name" oninput="purProdAC(this)" autocomplete="off" style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%"></div>
     <div class="fg" style="margin:0"><input class="pi-qty" type="number" value="1" min="1" oninput="purCalcTotal()" style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%"></div>
     <div class="fg" style="margin:0"><input class="pi-rate" type="number" placeholder="0" oninput="purCalcTotal()" style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%"></div>
+    <div class="fg" style="margin:0"><select class="pi-gst" onchange="purCalcTotal()" style="font-size:12px;padding:8px 4px;border-radius:9px;border:1px solid var(--bdr2);background:var(--bg1);color:var(--t1);width:100%"><option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18" selected>18%</option><option value="28">28%</option></select></div>
     <div class="fg" style="margin:0"><input class="pi-total" type="number" placeholder="0" readonly style="font-size:13px;padding:9px 12px;border-radius:9px;border:1px solid var(--acc);background:var(--accl);color:var(--t1);width:100%"></div>
     <div class="fg" style="margin:0"><button class="btn btd bts" onclick="this.closest('.pur-item-row').remove();purCalcTotal()" style="padding:9px 8px">✕</button></div>`;
   wrap.appendChild(row);
@@ -2850,16 +2855,32 @@ function addPurRow(){
 }
 
 function purCalcTotal(){
-  let grand=0;
+  let grandExcl=0, grandGST=0, grandTotal=0;
   document.querySelectorAll('.pur-item-row').forEach(row=>{
     const qty=+row.querySelector('.pi-qty')?.value||0;
     const rate=+row.querySelector('.pi-rate')?.value||0;
-    const tot=parseFloat((qty*rate).toFixed(2));
-    const ti=row.querySelector('.pi-total');if(ti)ti.value=tot||'';
-    grand+=tot;
+    const gstPct=+row.querySelector('.pi-gst')?.value||0;
+    const baseAmt=parseFloat((qty*rate).toFixed(2));
+    const gstAmt=parseFloat((baseAmt*gstPct/100).toFixed(2));
+    const total=parseFloat((baseAmt+gstAmt).toFixed(2));
+    const ti=row.querySelector('.pi-total');
+    if(ti) ti.value=total||'';
+    grandExcl+=baseAmt;
+    grandGST+=gstAmt;
+    grandTotal+=total;
   });
   const el=document.getElementById('pur-grand');
-  if(el)el.textContent=fmt(grand);
+  if(el) el.textContent=fmt(grandTotal);
+  // GST summary दिखाएं
+  const gs=document.getElementById('pur-gst-summary');
+  if(gs){
+    if(grandGST>0){
+      gs.style.display='block';
+      gs.innerHTML=`<span style="color:var(--t2);font-size:12px">Taxable: ${fmt(grandExcl)} + GST: <b style="color:var(--err-t)">${fmt(grandGST)}</b> = Total: <b>${fmt(grandTotal)}</b></span>`;
+    } else {
+      gs.style.display='none';
+    }
+  }
 }
 
 function purProdAC(inp){
@@ -2891,10 +2912,10 @@ function purProdAC(inp){
   drop.style.cssText='position:absolute;top:100%;left:0;right:0;background:var(--bg1);border:1px solid var(--bdr2);border-radius:9px;z-index:300;max-height:200px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.15);margin-top:2px';
   drop.innerHTML=matches.map(p=>`
     <div style="padding:7px 12px;cursor:pointer;border-bottom:.5px solid var(--bdr);font-size:13px"
-      onmousedown="purProdSelect(this,'${p.name.replace(/'/g,"\'")}',${p.buyPrice||0},${p.stock||0})"
+      onmousedown="purProdSelect(this,'${p.name.replace(/'/g,"\'")}',${p.buyPrice||0},${p.gst||0},${p.stock||0})"
       onmouseover="this.style.background='var(--accl)'" onmouseout="this.style.background=''">
       <span style="font-weight:500">${p.name}</span>
-      <span style="font-size:11px;color:var(--t2);margin-left:8px">₹${p.buyPrice||0} | Stock: ${p.stock||0}</span>
+      <span style="font-size:11px;color:var(--t2);margin-left:8px">₹${p.buyPrice||0} | GST: ${p.gst||0}% | Stock: ${p.stock||0}</span>
     </div>`).join('');
 
   // input को relative बनाएं
@@ -2903,16 +2924,17 @@ function purProdAC(inp){
   wrap.appendChild(drop);
 }
 
-function purProdSelect(el, name, buyPrice, stock){
+function purProdSelect(el, name, buyPrice, gst, stock){
   const row=el.closest('.pur-item-row');
   if(!row) return;
   const nameInp=row.querySelector('.pi-name');
   const rateInp=row.querySelector('.pi-rate');
+  const gstSel=row.querySelector('.pi-gst');
   const qtyInp=row.querySelector('.pi-qty');
   if(nameInp) nameInp.value=name;
   if(rateInp && !rateInp.value) rateInp.value=buyPrice||'';
+  if(gstSel) gstSel.value=gst||0;
   if(qtyInp) qtyInp.focus();
-  // Dropdown हटाएं
   const drop=row.querySelector('.pur-ac-drop');
   if(drop) drop.remove();
   purCalcTotal();
@@ -2922,20 +2944,28 @@ async function savePurchase(){
   // purCalcTotal पहले run करें ताकि totals fresh हों
   purCalcTotal();
   const rows=[...document.querySelectorAll('.pur-item-row')];
-  const items=rows.map(row=>({
-    name:(row.querySelector('.pi-name')?.value||'').trim(),
-    qty:+row.querySelector('.pi-qty')?.value||0,
-    rate:+row.querySelector('.pi-rate')?.value||0,
-    total:parseFloat(((+row.querySelector('.pi-qty')?.value||0)*(+row.querySelector('.pi-rate')?.value||0)).toFixed(2))
-  })).filter(i=>i.name&&i.qty>0&&i.rate>0);
+  const items=rows.map(row=>{
+    const qty=+row.querySelector('.pi-qty')?.value||0;
+    const rate=+row.querySelector('.pi-rate')?.value||0;
+    const gst=+row.querySelector('.pi-gst')?.value||0;
+    const base=parseFloat((qty*rate).toFixed(2));
+    const gstAmt=parseFloat((base*gst/100).toFixed(2));
+    const total=parseFloat((base+gstAmt).toFixed(2));
+    return {
+      name:(row.querySelector('.pi-name')?.value||'').trim(),
+      qty, rate, gst, gstAmt, base, total
+    };
+  }).filter(i=>i.name&&i.qty>0&&i.rate>0);
   if(!items.length){alert('कम से कम एक item डालें — Name, Qty और Rate ज़रूरी हैं');return}
   const grand=parseFloat(items.reduce((s,i)=>s+i.total,0).toFixed(2));
+  const grandExcl=parseFloat(items.reduce((s,i)=>s+i.base,0).toFixed(2));
+  const grandGST=parseFloat(items.reduce((s,i)=>s+i.gstAmt,0).toFixed(2));
   const pur={
     id:'pur_'+Date.now(),
     date:new Date(document.getElementById('pur-date').value).toISOString(),
     supplier:document.getElementById('pur-sup').value.trim()||'Unknown',
     invNo:document.getElementById('pur-inv').value.trim(),
-    items,total:grand,
+    items,total:grand,taxable:grandExcl,gstTotal:grandGST,
     notes:document.getElementById('pur-notes').value.trim()
   };
   // Update stock — inventory में जोड़ें / नया product create करें
@@ -2949,14 +2979,14 @@ async function savePurchase(){
       // नया product — inventory में add करें
       const newProd={
         id:Date.now()+Math.floor(Math.random()*1000),
-        name, barcode:'', hsn:'', gst:0,
+        name, barcode:'', hsn:'', gst:gst||0,
         buyPrice:rate, sellPrice:rate,
         stock:qty, minStock:5, unit:'Pcs'
       };
       D.products.push(newProd);
       sb.from('products').insert({
         id:newProd.id, shop_id:currentShop.id,
-        name:newProd.name, barcode:'', hsn:'', gst:0,
+        name:newProd.name, barcode:'', hsn:'', gst:gst||0,
         buy_price:rate, sell_price:rate,
         stock:qty, min_stock:5, unit:'Pcs'
       }).then(()=>{}).catch(()=>{});
